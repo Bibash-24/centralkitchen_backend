@@ -6,7 +6,7 @@ const mongoose = require("mongoose");
 // POST /api/menu-item
 const addMenuItem = async (req, res, next) => {
     try {
-        const { name, price, categoryId, isSpecial, isSalesHourItem, startTime, endTime, salePrice, recipe } = req.body;
+        const { name, price, categoryId, isSalesHourItem, startTime, endTime, salePrice, recipe } = req.body;
 
         if (!name || !name.trim()) {
             return next(createHttpError(400, "Item name is required!"));
@@ -72,7 +72,6 @@ const addMenuItem = async (req, res, next) => {
             name: name.trim(),
             price: priceStr,
             category: categoryId,
-            isSpecial: !!isSpecial,
             isSalesHourItem: !!isSalesHourItem,
             startTime: isSalesHourItem ? startTime : null,
             endTime: isSalesHourItem ? endTime : null,
@@ -118,7 +117,7 @@ const getMenuItems = async (req, res, next) => {
 const updateMenuItem = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const { name, price, categoryId, isActive, isSpecial, isSalesHourItem, startTime, endTime, salePrice, recipe } = req.body;
+        const { name, price, categoryId, isActive, isSalesHourItem, startTime, endTime, salePrice, recipe } = req.body;
 
         if (!mongoose.Types.ObjectId.isValid(id)) {
             return next(createHttpError(400, "Invalid item ID!"));
@@ -163,8 +162,7 @@ const updateMenuItem = async (req, res, next) => {
             item.price = priceStr;
         }
         if (isActive !== undefined) item.isActive = isActive;
-        if (isSpecial !== undefined) item.isSpecial = !!isSpecial;
-
+        
         const validatePromoPrice = (sp) => {
             if (!sp) return null;
             const spStr = String(sp).trim();

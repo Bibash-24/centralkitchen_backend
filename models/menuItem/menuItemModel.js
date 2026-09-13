@@ -20,10 +20,6 @@ const menuItemSchema = new mongoose.Schema({
         type: Boolean,
         default: true
     },
-    isSpecial: {
-        type: Boolean,
-        default: false
-    },
     isSalesHourItem: {
         type: Boolean,
         default: false

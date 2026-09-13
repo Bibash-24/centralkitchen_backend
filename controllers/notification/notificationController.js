@@ -5,6 +5,7 @@ const createError = require("http-errors");
 
 const getNotifications = async (req, res, next) => {
     try {
+        await Notification.deleteMany({ type: { $in: ["order", "assistance"] } });
         const config = await RestaurantConfig.findOne();
         if (config && config.creditEnabled && config.creditOverdueNotificationEnabled) {
             const creditors = await Creditor.find({ isDeleted: { $ne: true }, currentBalance: { $gt: 0 } });

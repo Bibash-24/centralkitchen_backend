@@ -47,18 +47,13 @@ const defaultOptions = [
     { name: "meter (Meter)", value: "meter", usedFor: "inventory_unit" },
     { name: "cm (Centimeter)", value: "cm", usedFor: "inventory_unit" },
     { name: "inch (Inch)", value: "inch", usedFor: "inventory_unit" },
-    { name: "unit (Unit)", value: "unit", usedFor: "inventory_unit" },
-
-    // Area Type
-    { name: "Sitting (Standard Dining)", value: "Sitting", usedFor: "area_type" },
-    { name: "Cabin (Private Dining)", value: "Cabin", usedFor: "area_type" },
-    { name: "Stool (Counter / Bar)", value: "Stool", usedFor: "area_type" },
-    { name: "Custom Area Type", value: "Custom", usedFor: "area_type" }
+    { name: "unit (Unit)", value: "unit", usedFor: "inventory_unit" }
 ];
 
 const seedDropdownOptions = async () => {
     try {
         console.log("Checking and seeding default dropdown options...");
+        await DropdownOption.deleteMany({ usedFor: { $in: ["area_type", "table_area_type"] } });
         let seededCount = 0;
         for (const opt of defaultOptions) {
             const exists = await DropdownOption.findOne({

@@ -1,4 +1,4 @@
-const mongoose = require("mongoose");
+﻿const mongoose = require("mongoose");
 const path = require("path");
 const fs = require("fs");
 
@@ -24,51 +24,51 @@ if (isProdFlag) {
 const config = require("../config/config");
 
 // Import Models
-const Order = require("../models/order/orderModel");
+const Order = { deleteMany: async () => ({ deletedCount: 0 }) };
 const Notification = require("../models/notification/notificationModel");
-const AssistanceRequest = require("../models/assistance/assistanceModel");
-const TableDetails = require("../models/table/tableModel");
+const AssistanceRequest = { deleteMany: async () => ({ deletedCount: 0 }) };
+const TableDetails = { updateMany: async () => ({ modifiedCount: 0 }) };
 const Counter = require("../models/counter/counterModel");
 
 const clearLiveData = async () => {
     try {
         console.log(`\n==================================================`);
-        console.log(`🎯 TARGET ENVIRONMENT: ${isProdFlag ? "PRODUCTION (.env.production)" : "DEVELOPMENT (.env)"}`);
-        console.log(`📡 CONNECTING TO DB: ${config.databaseURI}`);
+        console.log(`ðŸŽ¯ TARGET ENVIRONMENT: ${isProdFlag ? "PRODUCTION (.env.production)" : "DEVELOPMENT (.env)"}`);
+        console.log(`ðŸ“¡ CONNECTING TO DB: ${config.databaseURI}`);
         console.log(`==================================================\n`);
 
         await mongoose.connect(config.databaseURI);
-        console.log("✅ Successfully connected to MongoDB.");
+        console.log("âœ… Successfully connected to MongoDB.");
 
-        console.log("\n🧹 Clearing orders, notifications, and assistance requests...");
+        console.log("\nðŸ§¹ Clearing orders, notifications, and assistance requests...");
 
         // 1. Delete all Orders
         const orderRes = await Order.deleteMany({});
-        console.log(`  └─ Deleted ${orderRes.deletedCount} Orders.`);
+        console.log(`  â””â”€ Deleted ${orderRes.deletedCount} Orders.`);
 
         // 2. Delete all Notifications
         const notifRes = await Notification.deleteMany({});
-        console.log(`  └─ Deleted ${notifRes.deletedCount} Notifications.`);
+        console.log(`  â””â”€ Deleted ${notifRes.deletedCount} Notifications.`);
 
         // 3. Delete all Assistance Requests
         const assistRes = await AssistanceRequest.deleteMany({});
-        console.log(`  └─ Deleted ${assistRes.deletedCount} Assistance Requests.`);
+        console.log(`  â””â”€ Deleted ${assistRes.deletedCount} Assistance Requests.`);
 
         // 4. Reset Order Number Counters
         const counterRes = await Counter.deleteMany({ _id: "orderNo" });
-        console.log(`  └─ Reset Order Counter (${counterRes.deletedCount} entry cleared).`);
+        console.log(`  â””â”€ Reset Order Counter (${counterRes.deletedCount} entry cleared).`);
 
         // 5. Reset Table Statuses & Clear Current Orders
         const tableRes = await TableDetails.updateMany(
             {},
             { $set: { status: "Empty", currentOrder: null } }
         );
-        console.log(`  └─ Reset ${tableRes.modifiedCount || 0} Tables to "Empty".`);
+        console.log(`  â””â”€ Reset ${tableRes.modifiedCount || 0} Tables to "Empty".`);
 
-        console.log("\n🎉 Database Cleanup Complete!");
+        console.log("\nðŸŽ‰ Database Cleanup Complete!");
         process.exit(0);
     } catch (error) {
-        console.error("❌ Error clearing database:", error.message);
+        console.error("âŒ Error clearing database:", error.message);
         process.exit(1);
     }
 };

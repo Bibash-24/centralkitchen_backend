@@ -1165,18 +1165,12 @@ app.get("/tenants-details", requireSuperadminHTML, async (req, res) => {
 
 // Other Endpoints
 app.use("/api/user", require("./routes/user/userRoute"));
-app.use("/api/order", require("./routes/order/orderRoute"));
-app.use("/api/table", require("./routes/table/tableRoute"));
-app.use("/api/table-area", require("./routes/tableArea/tableAreaRoute"));
 app.use("/api/superuser", require("./routes/superadmin/superadminRoute"));
 app.use("/api/superuser/role-permissions", require("./routes/superadmin/rolePermissionRoute"));
 app.use("/api/restaurant", require("./routes/restaurant/restaurantRoute"));
 app.use("/api/menu-category", require("./routes/menuCategory/menuCategoryRoute"));
 app.use("/api/menu-item", require("./routes/menuItem/menuItemRoute"));
-app.use("/api/combo", require("./routes/combo/comboRoute"));
-app.use("/api/assistance", require("./routes/assistance/assistanceRoute"));
 app.use("/api/notification", require("./routes/notification/notificationRoute"));
-app.use("/api/customer", require("./routes/customer/customerRoute"));
 app.use("/api/vendor", require("./routes/vendor/vendorRoute"));
 app.use("/api/creditor", require("./routes/creditor/creditorRoute"));
 app.use("/api/inventory", require("./routes/inventory/inventoryRoute"));
@@ -1186,9 +1180,6 @@ app.use("/api/staff", require("./routes/staff/staffRoute"));
 app.use("/api/report", require("./routes/report/reportRoute"));
 app.use("/api/issue", require("./routes/issue/issueRoute"));
 app.use("/api/print", require("./routes/print/printRoute"));
-app.use("/api/franchise-inquiry", require("./routes/franchiseInquiry/franchiseInquiryRoute"));
-app.use("/api/table-reservation", require("./routes/tableReservation/tableReservationRoute"));
-app.use("/api/contact-inquiry", require("./routes/contactInquiry/contactInquiryRoute"));
 
 // Global Error Handler
 app.use(globalErrorHandler);

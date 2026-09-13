@@ -1,9 +1,9 @@
-const Order = require("../../models/order/orderModel");
+﻿const Order = { find: () => [] };
 const Inventory = require("../../models/inventory/inventoryModel");
 const Expense = require("../../models/expense/expenseModel");
 const Purchase = require("../../models/vendor/purchaseModel");
 const Creditor = require("../../models/creditor/creditorModel");
-const Customer = require("../../models/customer/customerModel");
+const Customer = { find: () => ({ populate: () => [] }) };
 const MenuItem = require("../../models/menuItem/menuItemModel");
 const createHttpError = require("http-errors");
 

@@ -9,6 +9,8 @@ const getDropdownOptions = async (req, res, next) => {
         
         if (usedFor) {
             query.usedFor = usedFor;
+        } else {
+            query.usedFor = { $nin: ["area_type", "table_area_type"] };
         }
 
         // Standard users only see active options
