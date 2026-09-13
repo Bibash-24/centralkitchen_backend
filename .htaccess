@@ -1,0 +1,35 @@
+# Disable directory indexing for security
+Options -Indexes
+
+# Allow all HTTP methods (GET, POST, PUT, PATCH, DELETE, OPTIONS) for LiteSpeed & Apache WAF
+<LimitExcept GET POST PUT PATCH DELETE OPTIONS>
+    Allow from all
+</LimitExcept>
+
+# Enable Rewrite Engine
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteBase /
+
+    # Handle WebSocket Connections (Socket.io)
+    RewriteCond %{HTTP:Upgrade} =websocket [NC]
+    RewriteCond %{HTTP:Connection} upgrade [NC]
+    RewriteRule ^(.*)$ ws://127.0.0.1:3015/$1 [P,L]
+
+    # Proxy all standard HTTP/HTTPS API requests to Node.js backend on Port 3015
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule ^(.*)$ http://127.0.0.1:3015/$1 [P,L]
+</IfModule>
+
+# Ensure Reverse Proxy Headers & Cookies match correctly
+<IfModule mod_proxy.c>
+    ProxyPassReverse / http://127.0.0.1:3015/
+    ProxyPreserveHost On
+</IfModule>
+
+# Ensure CORS & Proxy Headers are passed intact
+<IfModule mod_headers.c>
+    Header always set Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+    Header always set Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With, Accept"
+</IfModule>
