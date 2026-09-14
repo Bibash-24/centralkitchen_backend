@@ -34,7 +34,8 @@ const userSchema = new mongoose.Schema({
         required: true,
     },
 
-    role: {
+    companySlug: { type: String, default: "main-kitchen", index: true },
+  role: {
         type: String,
         required: false
     },

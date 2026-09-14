@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 
 const notificationSchema = new mongoose.Schema({
+  companySlug: { type: String, default: "main-kitchen", required: true, index: true },
     type: {
         type: String,
         enum: ["credit", "cheque", "inventory"],

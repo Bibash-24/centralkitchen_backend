@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 
 const expenseSchema = new mongoose.Schema({
+  companySlug: { type: String, default: "main-kitchen", required: true, index: true },
     description: {
         type: String,
         required: true

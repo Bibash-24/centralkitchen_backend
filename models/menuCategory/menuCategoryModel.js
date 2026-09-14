@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 
 const menuCategorySchema = new mongoose.Schema({
+  companySlug: { type: String, default: "main-kitchen", required: true, index: true },
     name: {
         type: String,
         required: true,
