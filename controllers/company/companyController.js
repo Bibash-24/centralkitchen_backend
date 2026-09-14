@@ -70,8 +70,41 @@ const getCompanyBySlug = async (req, res, next) => {
     }
 };
 
+
+// Update incorporated company details (Superadmin only)
+const updateCompany = async (req, res, next) => {
+    try {
+        const { slug } = req.params;
+        const { name, contactEmail, contactPhone, isActive, enabledModules } = req.body;
+
+        const company = await Company.findOne({ companySlug: String(slug).toLowerCase() });
+        if (!company) {
+            return res.status(404).json({ success: false, message: "Company tenant not found" });
+        }
+
+        if (name) company.name = name;
+        if (contactEmail !== undefined) company.contactEmail = contactEmail;
+        if (contactPhone !== undefined) company.contactPhone = contactPhone;
+        if (isActive !== undefined) company.isActive = Boolean(isActive);
+        if (Array.isArray(enabledModules)) company.enabledModules = enabledModules;
+
+        await company.save();
+
+        res.status(200).json({
+            success: true,
+            message: `Company '${company.name}' (${company.companySlug}) updated successfully!`,
+            data: company
+        });
+    } catch (err) {
+        next(err);
+    }
+};
+
 module.exports = {
     createCompany,
     getCompanies,
-    getCompanyBySlug
+    getCompanyBySlug,
+    updateCompany
 };
+
+
