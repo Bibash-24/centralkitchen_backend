@@ -7,8 +7,8 @@ const dbOptions = {
     socketTimeoutMS: 45000,
 };
 
-const ATLAS_URI = "mongodb+srv://chiyatown:Tea%40123_@pos-cluster.qtrxwek.mongodb.net/test?retryWrites=true&w=majority&appName=pos-cluster";
-const SUPERADMIN_ATLAS_URI = "mongodb+srv://chiyatown:Tea%40123_@pos-cluster.qtrxwek.mongodb.net/pos_superadmin_db?retryWrites=true&w=majority&appName=pos-cluster";
+const ATLAS_URI = "mongodb://127.0.0.1:27017/database_name";
+const SUPERADMIN_ATLAS_URI = "mongodb://127.0.0.1:27017/database_name";
 
 let superadminConn = mongoose.createConnection(config.superadminURI, dbOptions);
 

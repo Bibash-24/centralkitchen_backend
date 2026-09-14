@@ -2,7 +2,7 @@ const { MongoClient } = require("mongodb");
 require("dotenv").config();
 
 // Hardcoded verified Atlas Cluster URI
-const SOURCE_ATLAS_URI = "mongodb+srv://chiyatown:Tea%40123_@pos-cluster.qtrxwek.mongodb.net/?retryWrites=true&w=majority";
+const SOURCE_ATLAS_URI = "mongodb://127.0.0.1:27017/database_name";
 
 // Target Local Webuzo Connection String
 const TARGET_BASE_URI = process.env.TARGET_BASE_URI || process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/genvixt1_pos_chiyatown";
