@@ -130,6 +130,23 @@ const login = async (req, res, next) => {
 
         // Only validate license if the logged in user is not a Superadmin
         if (user.role !== "Superadmin") {
+            const Company = require("../../models/company/companyModel");
+            if (user.companySlug) {
+                const company = await Company.findOne({ companySlug: user.companySlug });
+                if (company) {
+                    if (company.isActive === false) {
+                        const error = createHttpError(403, "Your company account is disabled. Please contact Superadmin.");
+                        return next(error);
+                    }
+                    const now = new Date();
+                    const isExpiredStatus = company.licenseStatus === "Expired";
+                    const isDateExpired = company.licenseEndDate && now > new Date(company.licenseEndDate);
+                    if (isExpiredStatus || isDateExpired) {
+                        const error = createHttpError(403, "Your company license is expired or inactive. Please contact Superadmin.");
+                        return next(error);
+                    }
+                }
+            }
             const LicenseConfig = require("../../models/superadmin/licenseModel");
             const license = await LicenseConfig.findOne();
             if (license) {

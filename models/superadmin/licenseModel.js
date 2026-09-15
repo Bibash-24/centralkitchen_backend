@@ -26,6 +26,13 @@ const getDefaultActivationEndDate = () => {
 };
 
 const licenseSchema = new mongoose.Schema({
+    companySlug: {
+        type: String,
+        required: false,
+        lowercase: true,
+        trim: true,
+        index: true
+    },
     isTrialActive: {
         type: Boolean,
         default: false

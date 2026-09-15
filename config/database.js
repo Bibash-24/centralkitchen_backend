@@ -7,38 +7,51 @@ const dbOptions = {
     socketTimeoutMS: 45000,
 };
 
-const ATLAS_URI = "mongodb://127.0.0.1:27017/database_name";
-const SUPERADMIN_ATLAS_URI = "mongodb://127.0.0.1:27017/database_name";
+const ATLAS_URI = process.env.ATLAS_URI || process.env.MONGODB_FALLBACK_URI;
+const SUPERADMIN_ATLAS_URI = process.env.SUPERADMIN_ATLAS_URI || process.env.SUPERADMIN_MONGODB_FALLBACK_URI;
 
-let superadminConn = mongoose.createConnection(config.superadminURI, dbOptions);
+const superadminUri = config.superadminURI || SUPERADMIN_ATLAS_URI || config.databaseURI;
 
-superadminConn.on("connected", () => {
-    console.log("SUPERADMIN DB CONNECTED");
-});
+let superadminConn = null;
+if (superadminUri) {
+    superadminConn = mongoose.createConnection(superadminUri, dbOptions);
 
-superadminConn.on("error", (err) => {
-    console.error("SUPERADMIN DB CONNECTION FAILED, trying Atlas fallback...", err.message);
-    if (!superadminConn._fallbackTried) {
-        superadminConn._fallbackTried = true;
-        try {
-            superadminConn = mongoose.createConnection(SUPERADMIN_ATLAS_URI, dbOptions);
-        } catch (e) {}
-    }
-});
+    superadminConn.on("connected", () => {
+        console.log("SUPERADMIN DB CONNECTED");
+    });
+
+    superadminConn.on("error", (err) => {
+        console.error("SUPERADMIN DB CONNECTION FAILED:", err.message);
+        if (SUPERADMIN_ATLAS_URI && !superadminConn._fallbackTried) {
+            superadminConn._fallbackTried = true;
+            try {
+                superadminConn = mongoose.createConnection(SUPERADMIN_ATLAS_URI, dbOptions);
+            } catch (e) {}
+        }
+    });
+} else {
+    console.warn("SUPERADMIN_MONGODB_URI is not set in environment.");
+}
 
 const connectDB = async () => {
     try {
+        if (!config.databaseURI) {
+            throw new Error("MONGODB_URI is not defined in environment variables (.env / .env.production)");
+        }
         await mongoose.connect(config.databaseURI, dbOptions);
         console.log("DB CONNECTED");
     } catch (error) {
-        console.log("PRIMARY DB CONNECTION FAILED, connecting to Atlas Fallback...", error.message);
-        try {
-            await mongoose.connect(ATLAS_URI, dbOptions);
-            console.log("ATLAS FALLBACK DB CONNECTED");
-        } catch (fallbackErr) {
-            console.error("ALL DB CONNECTIONS FAILED:", fallbackErr.message);
-            process.exit(1);
+        console.log("PRIMARY DB CONNECTION FAILED:", error.message);
+        if (ATLAS_URI) {
+            try {
+                await mongoose.connect(ATLAS_URI, dbOptions);
+                console.log("FALLBACK DB CONNECTED");
+                return;
+            } catch (fallbackErr) {
+                console.error("ALL DB CONNECTIONS FAILED:", fallbackErr.message);
+            }
         }
+        process.exit(1);
     }
 };
 

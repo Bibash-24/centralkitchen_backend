@@ -4,11 +4,11 @@ require("dotenv").config({ path: path.resolve(__dirname, "../", envFile) });
 
 const config = Object.freeze({
     PORT: process.env.PORT || 3000,
-    databaseURI: process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/centralkitchen",
-    superadminURI: process.env.SUPERADMIN_MONGODB_URI || process.env.MONGODB_SUPERADMIN_URI || "mongodb://127.0.0.1:27017/centralkitchen_superadmin",
+    databaseURI: process.env.MONGODB_URI,
+    superadminURI: process.env.SUPERADMIN_MONGODB_URI || process.env.MONGODB_SUPERADMIN_URI || process.env.MONGODB_URI,
     nodeEnv: process.env.NODE_ENV || "development",
     isProduction: process.env.NODE_ENV === "production",
-    accessTokenSecret: process.env.ACCESS_TOKEN_SECRET || "your-default-secret-key",
+    accessTokenSecret: process.env.ACCESS_TOKEN_SECRET,
 });
 
 module.exports = config;

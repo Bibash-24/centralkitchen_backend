@@ -223,7 +223,14 @@ const getActiveTenants = async (req, res, next) => {
 
 const getLicenseConfig = async (req, res, next) => {
     try {
-        const config = await LicenseConfig.findOne();
+        const userSlug = req.user?.companySlug || req.headers["x-company-slug"];
+        let config = null;
+        if (userSlug && req.user?.role !== "Superadmin") {
+            config = await LicenseConfig.findOne({ companySlug: userSlug });
+        }
+        if (!config) {
+            config = await LicenseConfig.findOne();
+        }
         res.status(200).json({
             success: true,
             message: "License configuration retrieved successfully!",

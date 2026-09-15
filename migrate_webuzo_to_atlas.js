@@ -2,10 +2,10 @@ const { MongoClient } = require("mongodb");
 require("dotenv").config();
 
 // Source Webuzo MongoDB URI (runs locally inside Webuzo server)
-const WEBUZO_URI = process.env.WEBUZO_URI || "mongodb://127.0.0.1:27017/database_name";
+const WEBUZO_URI = process.env.WEBUZO_URI || process.env.LOCAL_MONGODB_URI;
 
 // Target Atlas Cluster URI
-const ATLAS_URI = process.env.ATLAS_URI || "mongodb://127.0.0.1:27017/database_name";
+const ATLAS_URI = process.env.ATLAS_URI || process.env.MONGODB_URI;
 
 const cleanURI = (uriStr) => {
     try {

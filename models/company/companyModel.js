@@ -24,6 +24,10 @@ const companySchema = new mongoose.Schema({
     default: "",
     trim: true
   },
+  yearlyFee: {
+    type: Number,
+    default: 0
+  },
   isActive: {
     type: Boolean,
     default: true
@@ -31,6 +35,19 @@ const companySchema = new mongoose.Schema({
   enabledModules: {
     type: [String],
     default: []
+  },
+  licenseStatus: {
+    type: String,
+    enum: ["Activated", "Trial"],
+    default: "Activated"
+  },
+  licenseStartDate: {
+    type: Date,
+    default: null
+  },
+  licenseEndDate: {
+    type: Date,
+    default: null
   },
   createdBy: {
     type: String,

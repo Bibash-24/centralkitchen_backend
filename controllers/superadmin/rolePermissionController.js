@@ -14,7 +14,7 @@ const getRolePermissions = async (req, res, next) => {
         });
 
         // Combine assigned roles with default system roles to verify (all lowercase for robustness)
-        const allSystemRoles = Array.from(new Set([...assignedRoles, "Admin", "cashier", "waiter"].map(r => r.toLowerCase())));
+        const allSystemRoles = Array.from(new Set([...assignedRoles, "Admin"].map(r => r.toLowerCase())));
 
         // Check if DB is empty
         const needsSeed = permissions.length === 0;
@@ -23,36 +23,9 @@ const getRolePermissions = async (req, res, next) => {
             // If completely empty, seed defaults
             const defaults = [
                 {
-                    role: "Superadmin",
-                    allowedMenus: ["home", "orders", "tables", "sales", "expenses", "accounts", "customers", "vendors", "creditors", "inventory", "menuSetup", "tableSetup", "inquiries", "settings", "reports"],
-                    allowedSubMenus: ["items", "categories", "combos", "qr", "timings", "details", "ratios", "users", "superuser", "permissions", "areas", "tables", "inventory-list", "inventory-setup", "directory", "setup", "list", "credit-setup", "vendors-directory", "cheque-setup", "inquiries-franchise", "inquiries-reservation", "inquiries-contact", "home-foh", "home-boh", "home-date-filter", "home-popular-dishes", "home-revenue-breakdown", "home-payment-mix", "home-expense-trend", "home-expense-breakdown", "home-order-distribution", "home-creditors-ledger", "home-loyalty-lifecycle", "duplicateTable", "sales-revenue", "financial-payments", "stock-inventory", "expenses-costs", "profitability", "crm-loyalty"],
-                    createdBy: "System",
-                    createdOn: new Date(),
-                    updatedBy: "System",
-                    updatedOn: new Date()
-                },
-                {
                     role: "Admin",
-                    allowedMenus: ["home", "orders", "tables", "sales", "expenses", "accounts", "customers", "vendors", "creditors", "inventory", "menuSetup", "tableSetup", "inquiries", "settings", "reports"],
-                    allowedSubMenus: ["items", "categories", "combos", "qr", "timings", "details", "ratios", "users", "superuser", "permissions", "areas", "tables", "inventory-list", "inventory-setup", "directory", "setup", "list", "credit-setup", "vendors-directory", "cheque-setup", "inquiries-franchise", "inquiries-reservation", "inquiries-contact", "home-foh", "home-boh", "home-date-filter", "home-popular-dishes", "home-revenue-breakdown", "home-payment-mix", "home-expense-trend", "home-expense-breakdown", "home-order-distribution", "home-creditors-ledger", "home-loyalty-lifecycle", "duplicateTable", "sales-revenue", "financial-payments", "stock-inventory", "expenses-costs", "profitability", "crm-loyalty"],
-                    createdBy: "System",
-                    createdOn: new Date(),
-                    updatedBy: "System",
-                    updatedOn: new Date()
-                },
-                {
-                    role: "cashier",
-                    allowedMenus: ["home", "orders", "tables", "sales", "expenses", "accounts", "customers", "vendors", "creditors", "inventory", "menuSetup", "settings"],
-                    allowedSubMenus: ["items", "categories", "combos", "qr", "timings", "details", "inventory-list", "directory", "list", "vendors-directory", "home-foh", "home-popular-dishes", "duplicateTable"],
-                    createdBy: "System",
-                    createdOn: new Date(),
-                    updatedBy: "System",
-                    updatedOn: new Date()
-                },
-                {
-                    role: "waiter",
-                    allowedMenus: ["home", "orders", "tables", "sales", "expenses", "accounts", "customers", "vendors", "creditors", "inventory", "menuSetup", "settings"],
-                    allowedSubMenus: ["items", "categories", "combos", "qr", "timings", "details", "inventory-list", "directory", "list", "vendors-directory", "home-foh", "home-popular-dishes", "duplicateTable"],
+                    allowedMenus: ["home", "orders", "tables", "sales", "expenses", "accounts", "customers", "vendors", "creditors", "inventory", "menuSetup", "tableSetup", "settings", "reports"],
+                    allowedSubMenus: ["items", "categories", "combos", "qr", "timings", "details", "ratios", "users", "inventory-list", "directory", "list", "vendors-directory", "home-foh", "home-popular-dishes", "duplicateTable", "sales-revenue", "financial-payments", "stock-inventory", "expenses-costs", "profitability"],
                     createdBy: "System",
                     createdOn: new Date(),
                     updatedBy: "System",
@@ -99,8 +72,6 @@ const getRolePermissions = async (req, res, next) => {
             }
         }
 
-
-
         res.status(200).json({
             success: true,
             message: "Role permissions retrieved successfully!",
@@ -115,23 +86,37 @@ const getRolePermissions = async (req, res, next) => {
 const updateRolePermissions = async (req, res, next) => {
     try {
         const updates = req.body || {};
-        const updaterRole = req.user.role;
-        const updaterName = req.user.email || String(req.user.phone || req.user.role);
+        const updaterRole = req.user ? req.user.role : "Superadmin";
+        const updaterName = req.user ? (req.user.email || String(req.user.phone || req.user.role)) : "System";
 
-        // Enforce hierarchy check
+        let adminAllowedMenus = null;
+
+        // Enforce hierarchy check for Admin users
         if (updaterRole && updaterRole.toLowerCase() === "admin") {
             const forbiddenKeys = Object.keys(updates).filter(roleKey => 
                 roleKey.toLowerCase() === "admin" || roleKey.toLowerCase() === "superadmin"
             );
             if (forbiddenKeys.length > 0) {
-                return next(createHttpError(403, "Forbidden. Admins can only change permissions for roles below them (cashier, waiter)."));
+                return next(createHttpError(403, "Forbidden. Admins can only change permissions for roles below them."));
             }
+
+            // Fetch Admin's own allowed menus to ensure Admin cannot grant unassigned menus
+            const adminPerm = await RolePermission.findOne({ 
+                role: { $regex: /^admin$/i }, 
+                isDeleted: { $ne: true } 
+            });
+            adminAllowedMenus = adminPerm ? (adminPerm.allowedMenus || []) : [];
         }
 
         for (const [role, config] of Object.entries(updates)) {
             if (config && (Array.isArray(config.allowedMenus) || Array.isArray(config.allowedSubMenus))) {
                 let allowedMenus = config.allowedMenus || [];
                 let allowedSubMenus = config.allowedSubMenus || [];
+
+                // If updated by Admin, filter allowedMenus to strictly be a subset of adminAllowedMenus
+                if (updaterRole && updaterRole.toLowerCase() === "admin" && Array.isArray(adminAllowedMenus)) {
+                    allowedMenus = allowedMenus.filter(m => m === "settings" || adminAllowedMenus.includes(m));
+                }
 
                 // Fallback guarantee: Settings and Details tab must always be allowed
                 if (!allowedMenus.includes("settings")) {
@@ -141,8 +126,9 @@ const updateRolePermissions = async (req, res, next) => {
                     allowedSubMenus = ["details", ...allowedSubMenus];
                 }
 
+                const escapedRole = role.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
                 let perm = await RolePermission.findOne({ 
-                    role: { $regex: new RegExp(`^${role}$`, 'i') }, 
+                    role: { $regex: new RegExp("^" + escapedRole + "$", "i") }, 
                     isDeleted: { $ne: true } 
                 });
                 if (!perm) {
@@ -154,6 +140,8 @@ const updateRolePermissions = async (req, res, next) => {
                 }
                 perm.allowedMenus = allowedMenus;
                 perm.allowedSubMenus = allowedSubMenus;
+                perm.markModified('allowedMenus');
+                perm.markModified('allowedSubMenus');
                 perm.updatedBy = updaterName;
                 perm.updatedOn = new Date();
                 await perm.save();
@@ -175,10 +163,10 @@ const updateRolePermissions = async (req, res, next) => {
 const deleteRolePermission = async (req, res, next) => {
     try {
         const { role } = req.params;
-        const updaterRole = req.user.role;
+        const updaterRole = req.user ? req.user.role : "Superadmin";
 
         // Enforce system roles cannot be deleted
-        if (["superadmin", "admin", "cashier", "waiter"].includes(role.toLowerCase())) {
+        if (["superadmin", "admin"].includes(role.toLowerCase())) {
             const error = createHttpError(400, "System roles cannot be deleted!");
             return next(error);
         }
@@ -190,7 +178,7 @@ const deleteRolePermission = async (req, res, next) => {
             return next(error);
         }
 
-        const updaterName = req.user.email || String(req.user.phone || req.user.role);
+        const updaterName = req.user ? (req.user.email || String(req.user.phone || req.user.role)) : "System";
         const deleted = await RolePermission.findOneAndUpdate(
             { role, isDeleted: { $ne: true } },
             {

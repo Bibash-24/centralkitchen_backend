@@ -14,9 +14,6 @@ const getRestaurantConfig = async (req, res, next) => {
         if (!config.enabledModules || config.enabledModules.length === 0) {
             config.enabledModules = ["home", "orders", "tables", "sales", "expenses", "accounts", "inventory", "customers", "creditors", "vendors", "menuSetup", "tableSetup", "settings", "reports"];
             changed = true;
-        } else if (!config.enabledModules.includes("reports")) {
-            config.enabledModules.push("reports");
-            changed = true;
         }
 
         const reportSubmenus = ["sales-revenue", "financial-payments", "stock-inventory", "expenses-costs", "profitability", "crm-loyalty"];
@@ -29,13 +26,6 @@ const getRestaurantConfig = async (req, res, next) => {
                 ...reportSubmenus
             ];
             changed = true;
-        } else {
-            reportSubmenus.forEach(sub => {
-                if (!config.enabledSubMenus.includes(sub)) {
-                    config.enabledSubMenus.push(sub);
-                    changed = true;
-                }
-            });
         }
 
         if (changed) {
