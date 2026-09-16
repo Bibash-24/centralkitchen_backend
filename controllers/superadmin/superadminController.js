@@ -1,3 +1,4 @@
+const Company = require("../../models/company/companyModel");
 const LicenseConfig = require("../../models/superadmin/licenseModel");
 const Superadmin = require("../../models/superadmin/superadminModel");
 const RestaurantConfig = require("../../models/restaurant/restaurantModel");
@@ -80,38 +81,45 @@ const superadminLogin = async (req, res, next) => {
 const getActiveTenants = async (req, res, next) => {
     try {
         const tenants = [];
-        const seenNames = new Set();
         let globalLicense = await LicenseConfig.findOne();
+        const primaryConfigs = await RestaurantConfig.find({});
+        const configMap = new Map();
+        primaryConfigs.forEach(c => {
+            if (c.slug) configMap.set(c.slug.toLowerCase(), c);
+            if (c.name) configMap.set(c.name.toLowerCase(), c);
+        });
 
-        const computeLicenseStatus = (lic, rCfg) => {
-            const l = lic || globalLicense || {};
-            const isTrial = l.isTrialActive !== undefined ? l.isTrialActive : true;
-            const isActivated = l.isSystemActivated !== undefined ? l.isSystemActivated : false;
-            
-            const trialStart = l.trialStartDate || new Date().toISOString().split('T')[0];
-            const trialEnd = l.trialEndDate || new Date(Date.now() + 15 * 86400000).toISOString().split('T')[0];
-            
-            const actStart = l.activationStartDate || trialStart;
-            const actEnd = l.activationEndDate || new Date(Date.now() + 365 * 86400000).toISOString().split('T')[0];
+        const companies = await Company.find({}).sort({ createdAt: -1 });
+
+        const computeLicenseStatus = (comp, lic, rCfg) => {
+            const statusType = comp.licenseStatus || "Activated";
+            const isActivated = statusType === "Activated";
+            const isTrial = statusType === "Trial";
+
+            const trialStart = comp.licenseStartDate ? new Date(comp.licenseStartDate).toISOString().split('T')[0] : (lic?.trialStartDate || new Date().toISOString().split('T')[0]);
+            const trialEnd = comp.licenseEndDate ? new Date(comp.licenseEndDate).toISOString().split('T')[0] : (lic?.trialEndDate || new Date(Date.now() + 15 * 86400000).toISOString().split('T')[0]);
+
+            const actStart = comp.licenseStartDate ? new Date(comp.licenseStartDate).toISOString().split('T')[0] : (lic?.activationStartDate || trialStart);
+            const actEnd = comp.licenseEndDate ? new Date(comp.licenseEndDate).toISOString().split('T')[0] : (lic?.activationEndDate || new Date(Date.now() + 365 * 86400000).toISOString().split('T')[0]);
 
             let status = "Inactive / Expired";
             let validFrom = trialStart;
             let validTo = trialEnd;
             let type = "Trial Period";
 
-            if (isActivated) {
+            if (isActivated && comp.isActive !== false) {
                 status = "System Activated";
                 validFrom = actStart;
                 validTo = actEnd;
                 type = "Annual Subscription";
-            } else if (isTrial) {
+            } else if (isTrial && comp.isActive !== false) {
                 status = "Trial Active";
                 validFrom = trialStart;
                 validTo = trialEnd;
                 type = "Evaluation Trial";
             }
 
-            const yearlyFee = (rCfg && rCfg.yearlyFee !== undefined) ? rCfg.yearlyFee : (l.yearlyFee !== undefined ? l.yearlyFee : 25000);
+            const yearlyFee = comp.yearlyFee !== undefined ? comp.yearlyFee : ((rCfg && rCfg.yearlyFee !== undefined) ? rCfg.yearlyFee : (lic?.yearlyFee !== undefined ? lic.yearlyFee : 25000));
 
             return {
                 status,
@@ -124,91 +132,37 @@ const getActiveTenants = async (req, res, next) => {
             };
         };
 
-        // 1. Fetch from primary database connection
-        const primaryConfigs = await RestaurantConfig.find({});
-        primaryConfigs.forEach(cfg => {
-            const item = cfg.toObject();
-            if (item.name) seenNames.add(item.name);
-            const licInfo = computeLicenseStatus(globalLicense, item);
+        companies.forEach(comp => {
+            const rCfg = configMap.get(comp.companySlug.toLowerCase()) || configMap.get(comp.name.toLowerCase());
+            const licInfo = computeLicenseStatus(comp, globalLicense, rCfg);
 
             tenants.push({
-                _id: item._id,
-                dbSource: mongoose.connection.name || "Primary DB",
-                name: item.name || "Unnamed Restaurant",
-                contactNumbers: item.contactNumbers || [],
-                address: item.address || "N/A",
-                panNumber: item.panNumber || "N/A",
-                defaultCurrency: item.defaultCurrency || "रु",
-                slogan: item.slogan || "",
-                enabledModules: item.enabledModules || [],
+                _id: comp._id,
+                companySlug: comp.companySlug,
+                name: comp.name,
+                contactEmail: comp.contactEmail || "N/A",
+                contactPhone: comp.contactPhone || "",
+                contactNumbers: comp.contactPhone ? [comp.contactPhone] : (rCfg?.contactNumbers || []),
+                address: comp.address || rCfg?.address || "N/A",
+                panNumber: comp.panNumber || rCfg?.panNumber || "N/A",
+                defaultCurrency: comp.defaultCurrency || rCfg?.defaultCurrency || "रु",
+                openingTime: comp.openingTime || rCfg?.openingTime || "08:00 AM",
+                closingTime: comp.closingTime || rCfg?.closingTime || "09:00 PM",
+                isVatApplicable: comp.isVatApplicable !== undefined ? comp.isVatApplicable : (rCfg?.isVatApplicable !== false),
+                logo: comp.logo || rCfg?.logo || "",
+                paymentQrCode: comp.paymentQrCode || rCfg?.paymentQrCode || "",
+                slogan: rCfg?.slogan || ("/" + comp.companySlug),
+                enabledModules: comp.enabledModules || (rCfg?.enabledModules || []),
                 licenseStatus: licInfo.status,
                 licenseType: licInfo.type,
                 validFrom: licInfo.validFrom,
                 validTo: licInfo.validTo,
                 yearlyFee: licInfo.yearlyFee,
-                createdAt: item.createdAt,
-                updatedAt: item.updatedAt
+                isActive: comp.isActive !== false,
+                createdAt: comp.createdAt,
+                updatedAt: comp.updatedAt
             });
         });
-
-        // 2. Scan cluster databases gracefully with fast timeout safety
-        try {
-            if (mongoose.connection && mongoose.connection.db) {
-                const adminDb = mongoose.connection.db.admin();
-                const listPromise = adminDb.listDatabases();
-                const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout scanning cluster DBs")), 1000));
-                
-                const dbs = await Promise.race([listPromise, timeoutPromise]);
-                
-                for (const dbInfo of (dbs.databases || [])) {
-                    if (["admin", "config", "local"].includes(dbInfo.name)) continue;
-                    if (dbInfo.name === mongoose.connection.name) continue;
-
-                    try {
-                        const targetDb = mongoose.connection.client.db(dbInfo.name);
-                        const collections = await targetDb.listCollections({ name: "restaurantconfigs" }).toArray();
-                        
-                        if (collections.length > 0) {
-                            const configs = await targetDb.collection("restaurantconfigs").find({}).toArray();
-                            let clusterLic = null;
-                            const licCollections = await targetDb.listCollections({ name: "licenseconfigs" }).toArray();
-                            if (licCollections.length > 0) {
-                                clusterLic = await targetDb.collection("licenseconfigs").findOne({});
-                            }
-
-                            configs.forEach(cfg => {
-                                if (cfg.name && !seenNames.has(cfg.name)) {
-                                    seenNames.add(cfg.name);
-                                    const licInfo = computeLicenseStatus(clusterLic || globalLicense, cfg);
-                                    tenants.push({
-                                        _id: cfg._id,
-                                        dbSource: dbInfo.name,
-                                        name: cfg.name,
-                                        contactNumbers: cfg.contactNumbers || [],
-                                        address: cfg.address || "N/A",
-                                        panNumber: cfg.panNumber || "N/A",
-                                        defaultCurrency: cfg.defaultCurrency || "रु",
-                                        slogan: cfg.slogan || "",
-                                        enabledModules: cfg.enabledModules || [],
-                                        licenseStatus: licInfo.status,
-                                        licenseType: licInfo.type,
-                                        validFrom: licInfo.validFrom,
-                                        validTo: licInfo.validTo,
-                                        yearlyFee: licInfo.yearlyFee,
-                                        createdAt: cfg.createdAt,
-                                        updatedAt: cfg.updatedAt
-                                    });
-                                }
-                            });
-                        }
-                    } catch (dbErr) {
-                        // Skip unaccessible DBs silently
-                    }
-                }
-            }
-        } catch (clusterErr) {
-            // Cluster DB listing fallback gracefully
-        }
 
         res.status(200).json({
             success: true,

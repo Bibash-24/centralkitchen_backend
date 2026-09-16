@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const { createCompany, getCompanies, getCompanyBySlug, updateCompany } = require("../../controllers/company/companyController");
+const { createCompany, getCompanies, getCompanyBySlug, updateCompany, deleteCompany } = require("../../controllers/company/companyController");
 
 /**
  * @swagger
@@ -221,5 +221,6 @@ router.post("/", createCompany);
 router.get("/", getCompanies);
 router.get("/:slug", getCompanyBySlug);
 router.put("/:slug", updateCompany);
+router.delete("/:slug", deleteCompany);
 
 module.exports = router;

@@ -47,6 +47,23 @@ const isVerifiedUser = async (req, res, next) => {
             return next(createHttpError(403, "Access Denied. Your account has been disabled by Admin."));
         }
 
+        // Check if non-superadmin user's company is deleted or disabled
+        if (user.role !== "Superadmin" && user.companySlug) {
+            const Company = require("../models/company/companyModel");
+            const cleanUserSlug = String(user.companySlug).toLowerCase().trim();
+            const rootSlug = cleanUserSlug.replace(/-deleted-\d+$/, '');
+            const company = await Company.findOne({
+                $or: [
+                    { companySlug: cleanUserSlug },
+                    { companySlug: new RegExp('^' + rootSlug + '(-deleted-\\d+)?$', 'i') }
+                ]
+            });
+
+            if (!company || company.isDeleted === true || company.isActive === false) {
+                return next(createHttpError(401, "Your company account has been deleted or disabled. Access denied."));
+            }
+        }
+
         // 4. Attach user object to the request
         req.user = user;
         next();

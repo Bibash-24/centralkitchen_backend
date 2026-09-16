@@ -166,21 +166,29 @@ const fetchTenantList = async () => {
     try {
         const RestaurantConfig = require("./models/restaurant/restaurantModel");
         const LicenseConfig = require("./models/superadmin/licenseModel");
-        const mongoose = require("mongoose");
-        const seenNames = new Set();
+        const Company = require("./models/company/companyModel");
         let globalLicense = await LicenseConfig.findOne();
         const today = new Date();
 
-        const computeLicenseStatus = (lic, rCfg) => {
-            const l = lic || globalLicense || {};
-            const isTrial = l.isTrialActive !== undefined ? l.isTrialActive : true;
-            const isActivated = l.isSystemActivated !== undefined ? l.isSystemActivated : false;
+        const primaryConfigs = await RestaurantConfig.find({});
+        const configMap = new Map();
+        primaryConfigs.forEach(c => {
+            if (c.slug) configMap.set(c.slug.toLowerCase(), c);
+            if (c.name) configMap.set(c.name.toLowerCase(), c);
+        });
 
-            const trialStart = l.trialStartDate || new Date().toISOString().split('T')[0];
-            const trialEnd = l.trialEndDate || new Date(Date.now() + 15 * 86400000).toISOString().split('T')[0];
+        const companies = await Company.find({}).sort({ createdAt: -1 });
 
-            const actStart = l.activationStartDate || trialStart;
-            const actEnd = l.activationEndDate || new Date(Date.now() + 365 * 86400000).toISOString().split('T')[0];
+        const computeLicenseStatus = (comp, lic, rCfg) => {
+            const statusType = comp.licenseStatus || "Activated";
+            const isActivated = statusType === "Activated";
+            const isTrial = statusType === "Trial";
+
+            const trialStart = comp.licenseStartDate ? new Date(comp.licenseStartDate).toISOString().split('T')[0] : (lic?.trialStartDate || new Date().toISOString().split('T')[0]);
+            const trialEnd = comp.licenseEndDate ? new Date(comp.licenseEndDate).toISOString().split('T')[0] : (lic?.trialEndDate || new Date(Date.now() + 15 * 86400000).toISOString().split('T')[0]);
+
+            const actStart = comp.licenseStartDate ? new Date(comp.licenseStartDate).toISOString().split('T')[0] : (lic?.activationStartDate || trialStart);
+            const actEnd = comp.licenseEndDate ? new Date(comp.licenseEndDate).toISOString().split('T')[0] : (lic?.activationEndDate || new Date(Date.now() + 365 * 86400000).toISOString().split('T')[0]);
 
             let status = "INACTIVE / EXPIRED";
             let validFrom = trialStart;
@@ -188,13 +196,13 @@ const fetchTenantList = async () => {
             let type = "EVALUATION TRIAL";
             let statusColor = "bg-red-500/10 text-red-500 border-red-500/20";
 
-            if (isActivated) {
+            if (isActivated && comp.isActive !== false) {
                 status = "SYSTEM ACTIVATED";
                 validFrom = actStart;
                 validTo = actEnd;
                 type = "ANNUAL SUBSCRIPTION";
                 statusColor = "bg-emerald-500/10 text-emerald-500 border-emerald-500/20";
-            } else if (isTrial) {
+            } else if (isTrial && comp.isActive !== false) {
                 status = "TRIAL ACTIVE";
                 validFrom = trialStart;
                 validTo = trialEnd;
@@ -202,8 +210,7 @@ const fetchTenantList = async () => {
                 statusColor = "bg-amber-500/10 text-amber-500 border-amber-500/20";
             }
 
-            const yearlyFee = (rCfg && rCfg.yearlyFee !== undefined) ? rCfg.yearlyFee : (l.yearlyFee !== undefined ? l.yearlyFee : 25000);
-
+            const yearlyFee = comp.yearlyFee !== undefined ? comp.yearlyFee : ((rCfg && rCfg.yearlyFee !== undefined) ? rCfg.yearlyFee : (lic?.yearlyFee !== undefined ? lic.yearlyFee : 25000));
             const validToDate = new Date(validTo);
             const daysLeft = Math.ceil((validToDate - today) / (1000 * 60 * 60 * 24));
             const isExpiringSoon = (status.includes('ACTIVE') || status.includes('ACTIVATED')) && (daysLeft <= 30);
@@ -220,21 +227,21 @@ const fetchTenantList = async () => {
             };
         };
 
-        const primaryConfigs = await RestaurantConfig.find({});
-        primaryConfigs.forEach(cfg => {
-            const item = cfg.toObject();
-            if (item.name) seenNames.add(item.name);
-            const licInfo = computeLicenseStatus(globalLicense, item);
+        companies.forEach(comp => {
+            const rCfg = configMap.get(comp.companySlug.toLowerCase()) || configMap.get(comp.name.toLowerCase());
+            const licInfo = computeLicenseStatus(comp, globalLicense, rCfg);
 
             tenantList.push({
-                _id: String(item._id),
-                dbSource: mongoose.connection.name || "Primary DB",
-                name: item.name || "Unnamed Restaurant",
-                contactNumbers: item.contactNumbers || [],
-                address: item.address || "N/A",
-                panNumber: item.panNumber || "N/A",
-                defaultCurrency: item.defaultCurrency || "रु",
-                slogan: item.slogan || "",
+                _id: String(comp._id),
+                companySlug: comp.companySlug,
+                name: comp.name,
+                contactPhone: comp.contactPhone || "",
+                contactEmail: comp.contactEmail || "N/A",
+                contactNumbers: comp.contactPhone ? [comp.contactPhone] : (rCfg?.contactNumbers || []),
+                address: comp.address || rCfg?.address || "N/A",
+                panNumber: comp.panNumber || rCfg?.panNumber || "N/A",
+                defaultCurrency: comp.defaultCurrency || rCfg?.defaultCurrency || "रु",
+                slogan: rCfg?.slogan || ("/" + comp.companySlug),
                 licenseStatus: licInfo.status,
                 licenseType: licInfo.type,
                 validFrom: licInfo.validFrom,
@@ -243,64 +250,9 @@ const fetchTenantList = async () => {
                 yearlyFee: licInfo.yearlyFee,
                 daysLeft: licInfo.daysLeft,
                 isExpiringSoon: licInfo.isExpiringSoon,
-                createdAt: item.createdAt ? new Date(item.createdAt).toLocaleDateString() : "N/A"
+                createdAt: comp.createdAt ? new Date(comp.createdAt).toLocaleDateString() : "N/A"
             });
         });
-
-        try {
-            const scanClusterDatabases = async () => {
-                if (mongoose.connection && mongoose.connection.db) {
-                    const adminDb = mongoose.connection.db.admin();
-                    const dbs = await adminDb.listDatabases();
-                    for (const dbInfo of (dbs.databases || [])) {
-                        if (["admin", "config", "local"].includes(dbInfo.name)) continue;
-                        if (dbInfo.name === mongoose.connection.name) continue;
-                        try {
-                            const targetDb = mongoose.connection.client.db(dbInfo.name);
-                            const collections = await targetDb.listCollections({ name: "restaurantconfigs" }).toArray();
-                            if (collections.length > 0) {
-                                const configs = await targetDb.collection("restaurantconfigs").find({}).toArray();
-                                let clusterLic = null;
-                                const licCollections = await targetDb.listCollections({ name: "licenseconfigs" }).toArray();
-                                if (licCollections.length > 0) {
-                                    clusterLic = await targetDb.collection("licenseconfigs").findOne({});
-                                }
-                                configs.forEach(cfg => {
-                                    if (cfg.name && !seenNames.has(cfg.name)) {
-                                        seenNames.add(cfg.name);
-                                        const licInfo = computeLicenseStatus(clusterLic || globalLicense, cfg);
-                                        tenantList.push({
-                                            _id: String(cfg._id),
-                                            dbSource: dbInfo.name,
-                                            name: cfg.name,
-                                            contactNumbers: cfg.contactNumbers || [],
-                                            address: cfg.address || "N/A",
-                                            panNumber: cfg.panNumber || "N/A",
-                                            defaultCurrency: cfg.defaultCurrency || "रु",
-                                            slogan: cfg.slogan || "",
-                                            licenseStatus: licInfo.status,
-                                            licenseType: licInfo.type,
-                                            validFrom: licInfo.validFrom,
-                                            validTo: licInfo.validTo,
-                                            statusColor: licInfo.statusColor,
-                                            yearlyFee: licInfo.yearlyFee,
-                                            daysLeft: licInfo.daysLeft,
-                                            isExpiringSoon: licInfo.isExpiringSoon,
-                                            createdAt: cfg.createdAt ? new Date(cfg.createdAt).toLocaleDateString() : "N/A"
-                                        });
-                                    }
-                                });
-                            }
-                        } catch (e) { }
-                    }
-                }
-            };
-
-            await Promise.race([
-                scanClusterDatabases(),
-                new Promise(resolve => setTimeout(resolve, 1500))
-            ]);
-        } catch (e) { }
     } catch (e) { }
     return tenantList;
 };
@@ -422,25 +374,23 @@ const renderAdminDashboardHTML = ({ currentUser, tenantList, currentPath }) => {
             const d = trElement ? trElement.dataset : {};
             if (!d) return;
 
-            document.getElementById('detailsTenantName').innerText = d.name || 'Tenant System';
-            document.getElementById('detailsTenantSlogan').innerText = d.slogan || 'POS System Tenant';
-            document.getElementById('detailsDbSource').innerText = d.dbsource || 'Primary DB';
-            document.getElementById('detailsContact').innerText = d.contact || 'N/A';
-            document.getElementById('detailsPan').innerText = d.pan || 'N/A';
-            document.getElementById('detailsAddress').innerText = d.address || 'N/A';
-            document.getElementById('detailsStatus').innerText = d.status || 'N/A';
-            document.getElementById('detailsValidity').innerText = d.validity || 'N/A';
-            document.getElementById('detailsFee').innerText = 'रु ' + Number(d.fee || 0).toLocaleString();
+            const setEl = (id, val) => {
+                const el = document.getElementById(id);
+                if (el) el.innerText = val;
+            };
 
-            const editBtn = document.getElementById('detailsEditFeeBtn');
-            if (editBtn) {
-                editBtn.onclick = function() {
-                    closeTenantDetailsModal();
-                    openEditModal(d.id, d.name, Number(d.fee));
-                };
-            }
+            setEl('detailsTenantName', d.name || 'Tenant System');
+            setEl('detailsCompanySlug', '/' + (d.companyslug || 'n/a'));
+            setEl('detailsContact', d.contact || 'N/A');
+            setEl('detailsEmail', d.email || 'N/A');
+            setEl('detailsPan', d.pan || 'N/A');
+            setEl('detailsAddress', d.address || 'N/A');
+            setEl('detailsStatus', d.status || 'N/A');
+            setEl('detailsValidity', d.validity || 'N/A');
+            setEl('detailsFee', 'रु ' + Number(d.fee || 0).toLocaleString());
 
-            document.getElementById('tenantDetailsModal').classList.remove('hidden');
+            const modal = document.getElementById('tenantDetailsModal');
+            if (modal) modal.classList.remove('hidden');
         }
 
         function closeTenantDetailsModal() {
@@ -590,13 +540,13 @@ const renderAdminDashboardHTML = ({ currentUser, tenantList, currentPath }) => {
                         <tr class="border-b text-xs font-bold uppercase tracking-wider bg-slate-100 dark:bg-[#242424] border-slate-200 dark:border-[#2a2a2a] text-slate-700 dark:text-[#ababab]">
                             <th class="py-4 pl-6 pr-2 text-center w-12">S.N.</th>
                             <th class="p-4">Tenant / System Name</th>
-                            <th class="p-4">Database Source</th>
+                            <th class="p-4">Company Slug</th>
                             <th class="p-4">Contact & PAN</th>
                             <th class="p-4">Address</th>
                             <th class="p-4">License Status</th>
                             <th class="p-4">Validity Range</th>
                             <th class="p-4">Yearly Fee (रु)</th>
-                            <th class="p-4 text-right">Actions</th>
+                            
                         </tr>
                     </thead>
                     <tbody id="tenantsTbody" class="divide-y divide-gray-200 dark:divide-[#262626] text-xs font-medium">
@@ -604,8 +554,7 @@ const renderAdminDashboardHTML = ({ currentUser, tenantList, currentPath }) => {
         const isAct = t.licenseStatus.includes('ACTIVE') || t.licenseStatus.includes('ACTIVATED');
         const cat = isAct ? 'active' : 'inactive';
         const safeName = escapeHTML(t.name);
-        const safeSlogan = escapeHTML(t.slogan || 'POS Tenant');
-        const safeDbSource = escapeHTML(t.dbSource);
+        const safeCompanySlug = escapeHTML(t.companySlug);
         const safeContacts = escapeHTML(t.contactNumbers.join(', ') || 'N/A');
         const safePan = escapeHTML(t.panNumber);
         const safeAddress = escapeHTML(t.address);
@@ -621,8 +570,7 @@ const renderAdminDashboardHTML = ({ currentUser, tenantList, currentPath }) => {
                                 class="tenant-row transition-colors cursor-pointer hover:bg-slate-500/10 text-slate-900 dark:text-[#f5f5f5]"
                                 data-id="${t._id}"
                                 data-name="${safeName.toLowerCase()}"
-                                data-slogan="${safeSlogan}"
-                                data-dbsource="${safeDbSource}"
+                                data-companyslug="${safeCompanySlug}"
                                 data-contact="${safeContacts.toLowerCase()}"
                                 data-pan="${safePan.toLowerCase()}"
                                 data-address="${safeAddress}"
@@ -637,11 +585,10 @@ const renderAdminDashboardHTML = ({ currentUser, tenantList, currentPath }) => {
                                 <td class="py-4 pl-6 pr-2 text-center font-bold text-xs">${idx + 1}</td>
                                 <td class="p-4">
                                     <div class="font-bold text-sm line-clamp-1">${safeName}</div>
-                                    <div class="text-[11px] text-slate-400 italic line-clamp-1 mt-0.5">${safeSlogan}</div>
                                 </td>
                                 <td class="p-4 font-semibold">
                                     <span class="px-2.5 py-1 rounded-md text-[10px] font-bold bg-slate-100 dark:bg-[#242424] border border-slate-200 dark:border-[#2a2a2a]">
-                                        ${safeDbSource}
+                                        /${safeCompanySlug}
                                     </span>
                                 </td>
                                 <td class="p-4">
@@ -669,14 +616,7 @@ const renderAdminDashboardHTML = ({ currentUser, tenantList, currentPath }) => {
                                         रु ${Number(t.yearlyFee).toLocaleString()}
                                     </span>
                                 </td>
-                                <td class="p-4 text-right" onclick="event.stopPropagation()">
-                                    <button 
-                                        onclick="openEditModal('${t._id}', '${jsEscapedName}', ${t.yearlyFee})"
-                                        class="px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-1.5 border bg-slate-100 dark:bg-[#242424] border-slate-300 dark:border-[#2a2a2a] text-slate-800 dark:text-[#f5f5f5] hover:border-primary"
-                                    >
-                                        <span>✏️ Edit Fee</span>
-                                    </button>
-                                </td>
+                                
                             </tr>
                             `;
     }).join('')}
@@ -700,8 +640,8 @@ const renderAdminDashboardHTML = ({ currentUser, tenantList, currentPath }) => {
 
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                 <div class="p-3.5 rounded-xl border bg-slate-50 dark:bg-[#1f1f1f] border-slate-200 dark:border-[#2a2a2a]">
-                    <span class="text-slate-400 font-bold block text-[10px] uppercase">Database Source</span>
-                    <span id="detailsDbSource" class="font-bold text-sm text-slate-800 dark:text-white">--</span>
+                    <span class="text-slate-400 font-bold block text-[10px] uppercase">Company Slug</span>
+                    <span id="detailsCompanySlug" class="font-mono font-bold text-sm text-primary">--</span>
                 </div>
                 <div class="p-3.5 rounded-xl border bg-slate-50 dark:bg-[#1f1f1f] border-slate-200 dark:border-[#2a2a2a]">
                     <span class="text-slate-400 font-bold block text-[10px] uppercase">Contact Number</span>
@@ -733,9 +673,7 @@ const renderAdminDashboardHTML = ({ currentUser, tenantList, currentPath }) => {
                 <button onclick="closeTenantDetailsModal()" class="px-4 py-2 rounded-xl text-xs font-bold cursor-pointer transition-colors bg-slate-100 dark:bg-[#242424] text-slate-800 dark:text-[#f5f5f5] hover:bg-slate-200 dark:hover:bg-[#2c2c2c]">
                     Close
                 </button>
-                <button id="detailsEditFeeBtn" class="px-5 py-2 rounded-xl bg-primary hover:bg-primary/90 text-white font-bold text-xs shadow-md cursor-pointer flex items-center gap-2 active:scale-95 transition-all">
-                    <span>✏️ Edit Fee</span>
-                </button>
+                
             </div>
         </div>
     </div>
@@ -912,7 +850,7 @@ app.get("/", async (req, res) => {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Genvix POS Superadmin Login</title>
+    <title>Superadmin Login</title>
     <link rel="icon" type="image/x-icon" href="/favicon/favicon.ico">
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon/favicon-32x32.png">
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon/favicon-16x16.png">
@@ -1026,14 +964,14 @@ app.get("/", async (req, res) => {
             <span id="themeIcon" class="flex items-center justify-center pointer-events-none"></span>
         </button>
 
-        <!-- Header Branding (Matches pos-frontend design) -->
+        <!-- Header Branding (Matches frontend design) -->
         <div class="text-center mb-6 relative z-10">
             <div class="w-14 h-14 mx-auto mb-3 rounded-2xl bg-[#be3e3f]/10 border border-[#be3e3f]/20 flex items-center justify-center shadow-lg shadow-[#be3e3f]/10">
-                <img src="/favicon/apple-touch-icon.png" alt="Genvix POS Logo" class="w-9 h-9 rounded-lg object-contain" />
+                <img src="/favicon/apple-touch-icon.png" alt="Genvix Logo" class="w-9 h-9 rounded-lg object-contain" />
             </div>
             <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#be3e3f]/10 border border-[#be3e3f]/20 text-[#be3e3f] dark:text-[#eb6975] text-[10px] font-extrabold uppercase tracking-wider mb-2">
                 <span class="w-2 h-2 rounded-full bg-[#be3e3f] animate-pulse"></span>
-                Genvix POS Server
+                Genvix Server
             </div>
         </div>
 

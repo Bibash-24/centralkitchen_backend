@@ -42,7 +42,7 @@ const register = async (req, res, next) => {
 
         const createdBy = (req.user && (req.user.email || req.user.phone)) ? (req.user.email || String(req.user.phone)) : "Self Registered";
         const isApproved = reqIsApproved || (createdBy !== "Self Registered" ? "approved" : "pending");
-        const newUser = new User({ name, phone, email, password, role: role || "", pin: cleanPin || undefined, createdBy, isApproved });
+        const newUser = new User({ name, phone, email, password, role: role || "", companySlug, pin: cleanPin || undefined, createdBy, isApproved });
         await newUser.save();
 
         // Convert to object and exclude sensitive data
@@ -98,7 +98,7 @@ const login = async (req, res, next) => {
 
         const isEmail = /\S+@\S+\.\S+/.test(email);
         const query = isEmail ? { email: email.trim().toLowerCase() } : { phone: Number(email.replace(/\D/g, "")) || 0 };
-        
+
         // Check superadmin database first
         let user = await Superadmin.findOne(query);
         if (!user) {
@@ -131,50 +131,62 @@ const login = async (req, res, next) => {
         // Only validate license if the logged in user is not a Superadmin
         if (user.role !== "Superadmin") {
             const Company = require("../../models/company/companyModel");
-            if (user.companySlug) {
-                const company = await Company.findOne({ companySlug: user.companySlug });
-                if (company) {
-                    if (company.isActive === false) {
-                        const error = createHttpError(403, "Your company account is disabled. Please contact Superadmin.");
-                        return next(error);
-                    }
-                    const now = new Date();
-                    const isExpiredStatus = company.licenseStatus === "Expired";
-                    const isDateExpired = company.licenseEndDate && now > new Date(company.licenseEndDate);
-                    if (isExpiredStatus || isDateExpired) {
-                        const error = createHttpError(403, "Your company license is expired or inactive. Please contact Superadmin.");
-                        return next(error);
-                    }
-                }
+            if (!user.companySlug) {
+                const error = createHttpError(403, "Your account is not assigned to an active company tenant. Access denied.");
+                return next(error);
             }
-            const LicenseConfig = require("../../models/superadmin/licenseModel");
-            const license = await LicenseConfig.findOne();
-            if (license) {
-                const todayStr = new Date().toISOString().split("T")[0];
-                
-                // If trial is active but expired, update database status
-                if (license.isTrialActive && todayStr > license.trialEndDate) {
-                    license.isTrialActive = false;
-                    await license.save();
-                }
-                
-                // If system activation is active but expired, update database status
-                if (license.isSystemActivated && todayStr > license.activationEndDate) {
-                    license.isSystemActivated = false;
-                    await license.save();
-                }
-                
-                // Block login if neither trial nor system activation is active
-                if (!license.isTrialActive && !license.isSystemActivated) {
-                    const error = createHttpError(403, "System License is expired or inactive. Please contact system provider.");
-                    return next(error);
-                }
-            } else {
-                // If no license configuration is found in the database, treat it as inactive/expired
-                const error = createHttpError(403, "System License is expired or inactive. Please contact system provider.");
+
+            const cleanUserSlug = String(user.companySlug).toLowerCase().trim();
+            const rootSlug = cleanUserSlug.replace(/-deleted-\d+$/, '');
+            const company = await Company.findOne({
+                $or: [
+                    { companySlug: cleanUserSlug },
+                    { companySlug: new RegExp('^' + rootSlug + '(-deleted-\\d+)?$', 'i') }
+                ]
+            });
+
+            if (!company || company.isDeleted || company.isActive === false) {
+                const error = createHttpError(403, "Your company account has been deleted or disabled. Access denied.");
+                return next(error);
+            }
+
+            const now = new Date();
+            const isExpiredStatus = company.licenseStatus === "Expired";
+            const isDateExpired = company.licenseEndDate && now > new Date(company.licenseEndDate);
+            if (isExpiredStatus || isDateExpired) {
+                const error = createHttpError(403, "Your company license is expired or inactive. Please contact Superadmin.");
                 return next(error);
             }
         }
+
+        const LicenseConfig = require("../../models/superadmin/licenseModel");
+        const license = await LicenseConfig.findOne();
+        if (license) {
+            const todayStr = new Date().toISOString().split("T")[0];
+
+            // If trial is active but expired, update database status
+            if (license.isTrialActive && todayStr > license.trialEndDate) {
+                license.isTrialActive = false;
+                await license.save();
+            }
+
+            // If system activation is active but expired, update database status
+            if (license.isSystemActivated && todayStr > license.activationEndDate) {
+                license.isSystemActivated = false;
+                await license.save();
+            }
+
+            // Block login if neither trial nor system activation is active
+            if (!license.isTrialActive && !license.isSystemActivated) {
+                const error = createHttpError(403, "System License is expired or inactive. Please contact system provider.");
+                return next(error);
+            }
+        } else {
+            // If no license configuration is found in the database, treat it as inactive/expired
+            const error = createHttpError(403, "System License is expired or inactive. Please contact system provider.");
+            return next(error);
+        }
+
 
         if (user.role !== "Superadmin") {
             if (user.isApproved === "pending" || user.isApproved === false) {
@@ -248,9 +260,9 @@ const logout = async (req, res, next) => {
 const getAllUsers = async (req, res, next) => {
     try {
         const users = await User.find({ isDeleted: { $ne: true } }).select("-password -__v");
-        
+
         let allUsers = [...users];
-        
+
         // Only include Superadmin records if the requester is a Superadmin
         if (req.user && req.user.role === "Superadmin") {
             const superadmins = await Superadmin.find({}).select("-password -__v");
@@ -653,15 +665,15 @@ const deleteUser = async (req, res, next) => {
     }
 };
 
-module.exports = { 
-    register, 
+module.exports = {
+    register,
     checkUserExists,
-    login, 
-    getUserData, 
-    logout, 
-    getAllUsers, 
-    toggleAccess, 
-    updateCredentials, 
+    login,
+    getUserData,
+    logout,
+    getAllUsers,
+    toggleAccess,
+    updateCredentials,
     updateProfile,
     adminUpdateUser,
     adminResetPassword,

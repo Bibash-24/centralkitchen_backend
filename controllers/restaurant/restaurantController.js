@@ -1,11 +1,23 @@
 const RestaurantConfig = require("../../models/restaurant/restaurantModel");
+const Company = require("../../models/company/companyModel");
 const createHttpError = require("http-errors");
 
 const getRestaurantConfig = async (req, res, next) => {
     try {
-        let config = await RestaurantConfig.findOne();
+        const userSlug = req.user?.companySlug || req.headers["x-company-slug"];
+        let company = null;
+        if (userSlug) {
+            company = await Company.findOne({ companySlug: String(userSlug).toLowerCase() });
+        }
+        
+        let config = null;
+        if (userSlug) {
+            config = await RestaurantConfig.findOne({ slug: String(userSlug).toLowerCase() });
+        }
         if (!config) {
-            // Seed a default config if it doesn't exist yet
+            config = await RestaurantConfig.findOne();
+        }
+        if (!config) {
             config = new RestaurantConfig({ createdBy: "System" });
             await config.save();
         }
@@ -31,10 +43,25 @@ const getRestaurantConfig = async (req, res, next) => {
         if (changed) {
             await config.save();
         }
+
+        const responseData = config.toObject();
+        if (company) {
+            responseData.name = company.name || responseData.name;
+            responseData.address = company.address || responseData.address;
+            responseData.panNumber = company.panNumber || responseData.panNumber;
+            responseData.defaultCurrency = company.defaultCurrency || responseData.defaultCurrency;
+            responseData.openingTime = company.openingTime || responseData.openingTime;
+            responseData.closingTime = company.closingTime || responseData.closingTime;
+            responseData.isVatApplicable = company.isVatApplicable !== undefined ? company.isVatApplicable : responseData.isVatApplicable;
+            responseData.logo = company.logo || responseData.logo;
+            responseData.paymentQrCode = company.paymentQrCode || responseData.paymentQrCode;
+            responseData.contactNumbers = company.contactPhone ? [company.contactPhone] : responseData.contactNumbers;
+        }
+
         res.status(200).json({
             success: true,
             message: "Restaurant configuration retrieved successfully!",
-            data: config
+            data: responseData
         });
     } catch (error) {
         next(error);
@@ -43,6 +70,7 @@ const getRestaurantConfig = async (req, res, next) => {
 
 const updateRestaurantConfig = async (req, res, next) => {
     try {
+        const userSlug = req.user?.companySlug || req.headers["x-company-slug"];
         const {
             name,
             contactNumbers,
@@ -81,25 +109,23 @@ const updateRestaurantConfig = async (req, res, next) => {
             wifiPrinterIp,
             wifiPrinterPort,
             thermalPaperWidth
-        } = req.body || {};
+        } = req.body;
 
-        const actorName = req.user 
-            ? (req.user.email || String(req.user.phone || req.user.role)) 
-            : "System";
-        let config = await RestaurantConfig.findOne();
+        const actorName = req.user ? (req.user.name || req.user.username) : "System";
+
+        let config = null;
+        if (userSlug) {
+            config = await RestaurantConfig.findOne({ slug: String(userSlug).toLowerCase() });
+        }
+        if (!config) {
+            config = await RestaurantConfig.findOne();
+        }
         if (!config) {
             config = new RestaurantConfig({ createdBy: actorName });
         }
 
-        if (name !== undefined) config.name = name;
-        if (contactNumbers !== undefined) {
-            // Allow comma-separated strings or arrays
-            if (Array.isArray(contactNumbers)) {
-                config.contactNumbers = contactNumbers;
-            } else if (typeof contactNumbers === "string") {
-                config.contactNumbers = contactNumbers.split(",").map(num => num.trim()).filter(Boolean);
-            }
-        }
+        if (name) config.name = name;
+        if (contactNumbers && Array.isArray(contactNumbers)) config.contactNumbers = contactNumbers;
         if (address !== undefined) config.address = address;
         if (panNumber !== undefined) config.panNumber = panNumber;
         if (defaultCurrency !== undefined) config.defaultCurrency = defaultCurrency;
@@ -151,9 +177,29 @@ const updateRestaurantConfig = async (req, res, next) => {
 
         await config.save();
 
+        // Also sync fields directly into Company model record if userSlug is available
+        if (userSlug) {
+            const compUpdates = {};
+            if (address !== undefined) compUpdates.address = address;
+            if (panNumber !== undefined) compUpdates.panNumber = panNumber;
+            if (defaultCurrency !== undefined) compUpdates.defaultCurrency = defaultCurrency;
+            if (openingTime !== undefined) compUpdates.openingTime = openingTime;
+            if (closingTime !== undefined) compUpdates.closingTime = closingTime;
+            if (isVatApplicable !== undefined) compUpdates.isVatApplicable = isVatApplicable;
+            if (logo !== undefined) compUpdates.logo = logo;
+            if (paymentQrCode !== undefined) compUpdates.paymentQrCode = paymentQrCode;
+
+            if (Object.keys(compUpdates).length > 0) {
+                await Company.findOneAndUpdate(
+                    { companySlug: String(userSlug).toLowerCase() },
+                    compUpdates
+                );
+            }
+        }
+
         res.status(200).json({
             success: true,
-            message: "Restaurant configuration updated successfully!",
+            message: "Company details updated successfully!",
             data: config
         });
     } catch (error) {

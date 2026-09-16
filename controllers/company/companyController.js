@@ -99,7 +99,7 @@ const createCompany = async (req, res, next) => {
 // Get all incorporated companies (Superadmin only)
 const getCompanies = async (req, res, next) => {
     try {
-        const companies = await Company.find().sort({ createdAt: -1 });
+        const companies = await Company.find({ isDeleted: { $ne: true } }).sort({ createdAt: -1 });
         res.status(200).json({
             success: true,
             data: companies
@@ -113,7 +113,7 @@ const getCompanies = async (req, res, next) => {
 const getCompanyBySlug = async (req, res, next) => {
     try {
         const { slug } = req.params;
-        const company = await Company.findOne({ companySlug: String(slug).toLowerCase() });
+        const company = await Company.findOne({ companySlug: String(slug).toLowerCase(), isDeleted: { $ne: true } });
         if (!company) {
             return res.status(404).json({ success: false, message: "Company not found" });
         }
@@ -194,9 +194,72 @@ const updateCompany = async (req, res, next) => {
     }
 };
 
+
+// Delete company tenant (Superadmin only)
+const deleteCompany = async (req, res, next) => {
+    try {
+        const { slug } = req.params;
+        const cleanSlug = String(slug).toLowerCase().trim();
+
+        let company = await Company.findOne({
+            $or: [{ companySlug: cleanSlug }, { _id: cleanSlug.match(/^[0-9a-fA-F]{24}$/) ? cleanSlug : null }],
+            isDeleted: { $ne: true }
+        });
+
+        if (!company) {
+            return res.status(404).json({ success: false, message: "Company tenant not found or already deleted." });
+        }
+
+        const actorName = req.user ? (req.user.name || req.user.username) : "Superadmin";
+        const oldSlug = company.companySlug;
+
+        company.isDeleted = true;
+        company.isActive = false;
+        company.deletedBy = actorName;
+        company.deletedAt = new Date();
+        company.companySlug = `${oldSlug}-deleted-${Date.now()}`;
+        await company.save();
+
+        // Mark associated users as deleted
+        const rootSlug = oldSlug.replace(/-deleted-\d+$/, '');
+        const userSlugRegex = new RegExp('^' + rootSlug + '(-deleted-\\d+)?$', 'i');
+        const usersToClean = await User.find({
+            $or: [
+                { companySlug: oldSlug },
+                { companySlug: userSlugRegex }
+            ],
+            isDeleted: { $ne: true }
+        });
+        for (const u of usersToClean) {
+            u.isDeleted = true;
+            u.companySlug = company.companySlug;
+            const uniqueSuffix = 'deleted-' + Date.now() + '-' + Math.floor(Math.random()*1000);
+            if (u.email) u.email = uniqueSuffix + '-' + u.email;
+            if (u.phone) u.phone = null;
+            u.deletedBy = actorName;
+            u.deletedOn = new Date();
+            await u.save();
+        }
+
+        // Clean up LicenseConfig
+        try {
+            const LicenseConfig = require("../../models/company/licenseConfigModel");
+            await LicenseConfig.deleteOne({ companySlug: oldSlug });
+        } catch (ignore) {}
+
+        res.status(200).json({
+            success: true,
+            message: `Company '${company.name}' and all associated user accounts deleted successfully.`
+        });
+    } catch (err) {
+        next(err);
+    }
+};
+
 module.exports = {
     createCompany,
     getCompanies,
     getCompanyBySlug,
-    updateCompany
+    updateCompany,
+    deleteCompany
 };

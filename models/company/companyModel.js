@@ -24,13 +24,64 @@ const companySchema = new mongoose.Schema({
     default: "",
     trim: true
   },
+  address: {
+    type: String,
+    default: "Mid Baneshwor, Kathmandu, Nepal",
+    trim: true
+  },
+  panNumber: {
+    type: String,
+    default: "609548231",
+    trim: true
+  },
+  defaultCurrency: {
+    type: String,
+    default: "रु",
+    trim: true
+  },
+  openingTime: {
+    type: String,
+    default: "08:00 AM"
+  },
+  closingTime: {
+    type: String,
+    default: "09:00 PM"
+  },
+  isVatApplicable: {
+    type: Boolean,
+    default: true
+  },
+  vatPercentage: {
+    type: Number,
+    default: 13
+  },
+  logo: {
+    type: String,
+    default: ""
+  },
+  paymentQrCode: {
+    type: String,
+    default: ""
+  },
   yearlyFee: {
     type: Number,
-    default: 0
+    default: 25000
   },
   isActive: {
     type: Boolean,
     default: true
+  },
+  isDeleted: {
+    type: Boolean,
+    default: false
+  },
+  deletedBy: {
+    type: String,
+    default: ""
+  },
+  deletedAt: {
+    type: Date,
+    default: null
   },
   enabledModules: {
     type: [String],
