@@ -139,6 +139,8 @@ app.use("/api/user/register", authRateLimiter);
 
 // Serve static favicon files
 app.use('/favicon', express.static(path.join(__dirname, 'favicon')));
+app.get('/logo.png', (req, res) => res.sendFile(path.join(__dirname, 'logo.png')));
+app.use('/logo.png', express.static(path.join(__dirname, 'logo.png')));
 app.use('/favicon.ico', express.static(path.join(__dirname, 'favicon', 'favicon.ico')));
 
 // Setup protected Swagger docs after body & cookie parser
@@ -434,12 +436,7 @@ const renderAdminDashboardHTML = ({ currentUser, tenantList, currentPath }) => {
     <!-- Top Header Navigation Bar (Identical to Inventory & Vendors) -->
     <div class="flex flex-col xl:flex-row items-start xl:items-center justify-between px-4 sm:px-10 py-4 gap-4 flex-shrink-0 border-b w-full bg-white dark:bg-[#1a1a1a] border-slate-200 dark:border-[#2a2a2a] shadow-xs transition-colors duration-300">
         <div class="flex items-center gap-3.5">
-            <div class="w-10 h-10 rounded-xl bg-[#be3e3f]/10 border border-[#be3e3f]/20 flex items-center justify-center shrink-0">
-                <img src="/favicon/apple-touch-icon.png" alt="Genvix Logo" class="w-7 h-7 rounded-lg object-contain" />
-            </div>
-            <h1 class="text-xl sm:text-2xl font-bold tracking-wider text-slate-800 dark:text-[#f5f5f5]">
-                Tenants & System Overview
-            </h1>
+            <img src="/logo.png" alt="DeliGati Logo" class="h-10 sm:h-12 w-auto max-w-[200px] object-contain shrink-0 cursor-pointer" />
         </div>
 
         <!-- Search Bar & Controls -->
@@ -570,24 +567,24 @@ const renderAdminDashboardHTML = ({ currentUser, tenantList, currentPath }) => {
                     </thead>
                     <tbody id="tenantsTbody" class="divide-y divide-gray-200 dark:divide-[#262626] text-xs font-medium">
                         ${(() => {
-                            let activeCounter = 0;
-                            let removedCounter = 0;
-                            return tenantList.map((t, idx) => {
-                                const displaySN = t.isDeleted ? ++removedCounter : ++activeCounter;
-        const isAct = t.licenseStatus.includes('ACTIVE') || t.licenseStatus.includes('ACTIVATED');
-        const cat = isAct ? 'active' : 'inactive';
-        const safeName = escapeHTML(t.name);
-        const safeCompanySlug = escapeHTML(t.companySlug);
-        const safeContacts = escapeHTML(t.contactNumbers.join(', ') || 'N/A');
-        const safePan = escapeHTML(t.panNumber);
-        const safeAddress = escapeHTML(t.address);
-        const safeCurrency = escapeHTML(t.defaultCurrency);
-        const safeStatus = escapeHTML(t.licenseStatus);
-        const safeType = escapeHTML(t.licenseType);
-        const safeFrom = escapeHTML(t.validFrom);
-        const safeTo = escapeHTML(t.validTo);
-        const jsEscapedName = (t.name || '').replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/"/g, "&quot;");
-        return `
+            let activeCounter = 0;
+            let removedCounter = 0;
+            return tenantList.map((t, idx) => {
+                const displaySN = t.isDeleted ? ++removedCounter : ++activeCounter;
+                const isAct = t.licenseStatus.includes('ACTIVE') || t.licenseStatus.includes('ACTIVATED');
+                const cat = isAct ? 'active' : 'inactive';
+                const safeName = escapeHTML(t.name);
+                const safeCompanySlug = escapeHTML(t.companySlug);
+                const safeContacts = escapeHTML(t.contactNumbers.join(', ') || 'N/A');
+                const safePan = escapeHTML(t.panNumber);
+                const safeAddress = escapeHTML(t.address);
+                const safeCurrency = escapeHTML(t.defaultCurrency);
+                const safeStatus = escapeHTML(t.licenseStatus);
+                const safeType = escapeHTML(t.licenseType);
+                const safeFrom = escapeHTML(t.validFrom);
+                const safeTo = escapeHTML(t.validTo);
+                const jsEscapedName = (t.name || '').replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/"/g, "&quot;");
+                return `
                              <tr 
                                 onclick="openTenantDetailsModal(this)"
                                 class="tenant-row ${t.isDeleted ? 'hidden' : ''} transition-colors cursor-pointer hover:bg-slate-500/10 text-slate-900 dark:text-[#f5f5f5] divide-x divide-slate-200 dark:divide-[#2a2a2a]"
@@ -617,11 +614,11 @@ const renderAdminDashboardHTML = ({ currentUser, tenantList, currentPath }) => {
                                     </span>
                                 </td>
                                 <td class="align-middle p-4">
-                                    <div class="font-bold text-primary dark:text-[#eb6975]">📞 ${safeContacts}</div>
+                                    <div class="font-bold text-primary dark:text-[#eb6975]"> ${safeContacts}</div>
                                     <div class="text-[10px] text-slate-400">PAN: ${safePan}</div>
                                 </td>
                                 <td class="align-middle p-4">
-                                    <div class="break-words leading-tight">📍 ${safeAddress}</div>
+                                    <div class="break-words leading-tight"> ${safeAddress}</div>
                                     <div class="text-[10px] text-slate-400">Symbol: ${safeCurrency}</div>
                                 </td>
                                 <td class="align-middle p-4">
@@ -629,7 +626,7 @@ const renderAdminDashboardHTML = ({ currentUser, tenantList, currentPath }) => {
                                         ${safeStatus}
                                     </span>
                                     ${t.isExpiringSoon ? `
-                                        <div class="text-[10px] font-extrabold text-amber-500 mt-1">⚠️ Ends in ${t.daysLeft} Days</div>
+                                        <div class="text-[10px] font-extrabold text-amber-500 mt-1"> Ends in ${t.daysLeft} Days</div>
                                     ` : ''}
                                 </td>
                                 <td class="align-middle p-4">
@@ -644,8 +641,8 @@ const renderAdminDashboardHTML = ({ currentUser, tenantList, currentPath }) => {
                                 
                             </tr>
                             `;
-                            }).join('');
-                        })()}
+            }).join('');
+        })()}
                     </tbody>
                 </table>
             </div>
@@ -893,7 +890,7 @@ app.get("/", async (req, res) => {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Superadmin Login</title>
+    <title>DeliGati System Portal</title>
     <link rel="icon" type="image/x-icon" href="/favicon/favicon.ico">
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon/favicon-32x32.png">
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon/favicon-16x16.png">
@@ -1009,13 +1006,7 @@ app.get("/", async (req, res) => {
 
         <!-- Header Branding (Matches frontend design) -->
         <div class="text-center mb-6 relative z-10">
-            <div class="w-14 h-14 mx-auto mb-3 rounded-2xl bg-[#be3e3f]/10 border border-[#be3e3f]/20 flex items-center justify-center shadow-lg shadow-[#be3e3f]/10">
-                <img src="/favicon/apple-touch-icon.png" alt="Genvix Logo" class="w-9 h-9 rounded-lg object-contain" />
-            </div>
-            <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#be3e3f]/10 border border-[#be3e3f]/20 text-[#be3e3f] dark:text-[#eb6975] text-[10px] font-extrabold uppercase tracking-wider mb-2">
-                <span class="w-2 h-2 rounded-full bg-[#be3e3f] animate-pulse"></span>
-                Genvix Server
-            </div>
+            <img src="/logo.png" alt="DeliGati Logo" class="h-16 sm:h-20 w-auto max-w-[280px] sm:max-w-[340px] mx-auto mb-4 object-contain transition-transform duration-300 drop-shadow-md" />
         </div>
 
         <div id="alertBox" class="hidden mb-5 p-3.5 rounded-xl text-xs font-semibold text-center transition-all"></div>
@@ -1067,7 +1058,7 @@ app.get("/", async (req, res) => {
         </form>
 
         <div class="mt-6 pt-4 border-t border-slate-200 dark:border-[#262626] text-center text-[11px] text-slate-400 dark:text-[#ababab]">
-            <p>Protected System Portal &bull; Genvix Tech POS</p>
+            <p>Protected System Portal &bull; DeliGati</p>
         </div>
     </div>
 

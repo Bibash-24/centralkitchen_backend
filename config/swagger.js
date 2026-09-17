@@ -85,7 +85,7 @@ const swaggerOptions = {
     customCss: `
         .swagger-ui .topbar { background-color: #1a1a1a !important; border-bottom: 1px solid #2a2a2a !important; padding: 12px 20px !important; }
         .swagger-ui .topbar-wrapper { max-width: 1200px !important; margin: 0 auto !important; display: flex !important; align-items: center !important; justify-content: space-between !important; width: 100% !important; }
-        .swagger-ui .topbar-wrapper img { content: url('/favicon/apple-touch-icon.png') !important; width: 36px !important; height: 36px !important; border-radius: 10px !important; }
+        .swagger-ui .topbar-wrapper img { content: url('/logo.png') !important; height: 44px !important; width: auto !important; max-width: 180px !important; object-fit: contain !important; border-radius: 0 !important; background: transparent !important; }
         .swagger-nav-actions { display: flex !important; align-items: center !important; gap: 10px !important; margin-left: auto !important; }
         .swagger-nav-btn { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important; font-size: 12px !important; font-weight: 700 !important; padding: 8px 14px !important; border-radius: 10px !important; text-decoration: none !important; transition: all 0.2s !important; cursor: pointer !important; border: none !important; }
         .swagger-btn-portal { background: #be3e3f !important; color: #ffffff !important; box-shadow: 0 4px 12px rgba(190, 62, 63, 0.25) !important; }
