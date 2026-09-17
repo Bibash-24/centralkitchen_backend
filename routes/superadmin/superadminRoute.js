@@ -213,7 +213,7 @@ router.route("/license").patch(isVerifiedUser, isSuperadmin, updateLicenseConfig
  * @swagger
  * /api/superuser/active-tenants:
  *   get:
- *     summary: Retrieve list of all active tenant restaurants using Genvix POS across database clusters
+ *     summary: Retrieve list of all active tenant restaurants using DeliGati across database clusters
  *     tags: [Superadmin]
  *     security:
  *       - cookieAuth: []

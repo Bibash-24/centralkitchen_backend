@@ -33,7 +33,7 @@ const sendIssueEmail = async ({ issue, reporter }) => {
     // Non-blocking asynchronous background execution for sub-millisecond API response time
     setImmediate(async () => {
         const supportEmail = "support@genvixtech.com";
-        const subject = `[Genvix POS Issue] [${(issue.priority || "normal").toUpperCase()}] ${issue.title}`;
+        const subject = `[DeliGati Issue] [${(issue.priority || "normal").toUpperCase()}] ${issue.title}`;
 
         let attachments = [];
         let imageHtml = "";
@@ -78,7 +78,7 @@ const sendIssueEmail = async ({ issue, reporter }) => {
                 ${imageHtml}
 
                 <p style="margin-top: 20px; font-size: 11px; color: #71717a; text-align: center;">
-                    Genvix POS Automated Issue Reporting &bull; Sent to ${supportEmail}
+                    DeliGati Automated Issue Reporting &bull; Sent to ${supportEmail}
                 </p>
             </div>
         `;
@@ -87,7 +87,7 @@ const sendIssueEmail = async ({ issue, reporter }) => {
             const transporter = getTransporter();
             if (transporter) {
                 const mailOptions = {
-                    from: `"Genvix POS System" <${process.env.SMTP_USER || "support@genvixtech.com"}>`,
+                    from: `"DeliGati System" <${process.env.SMTP_USER || "support@genvixtech.com"}>`,
                     to: supportEmail,
                     subject: subject,
                     html: htmlContent,

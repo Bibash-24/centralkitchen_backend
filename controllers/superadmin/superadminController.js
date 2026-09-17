@@ -22,8 +22,8 @@ const superadminLogin = async (req, res, next) => {
         const isEmail = /\S+@\S+\.\S+/.test(credentialStr);
         const cleanedPhone = Number(credentialStr.replace(/\D/g, "")) || 0;
 
-        const query = isEmail 
-            ? { email: credentialStr.toLowerCase() } 
+        const query = isEmail
+            ? { email: credentialStr.toLowerCase() }
             : { $or: [{ phone: cleanedPhone }, { email: credentialStr.toLowerCase() }] };
 
         const user = await Superadmin.findOne(query);
@@ -166,7 +166,7 @@ const getActiveTenants = async (req, res, next) => {
 
         res.status(200).json({
             success: true,
-            message: "Active Genvix POS tenant restaurants retrieved successfully!",
+            message: "Active DeliGati tenants retrieved successfully!",
             count: tenants.length,
             data: tenants
         });
@@ -207,13 +207,13 @@ const updateLicenseConfig = async (req, res, next) => {
             yearlyFee,
             restaurantId
         } = req.body || {};
-        
+
         const actorName = req.user ? (req.user.email || String(req.user.phone || req.user.role)) : "System";
         let config = await LicenseConfig.findOne();
         if (!config) {
             config = new LicenseConfig({ createdBy: actorName });
         }
-        
+
         if (isTrialActive !== undefined) config.isTrialActive = isTrialActive;
         if (trialStartDate !== undefined) config.trialStartDate = trialStartDate;
         if (trialEndDate !== undefined) config.trialEndDate = trialEndDate;
@@ -221,10 +221,10 @@ const updateLicenseConfig = async (req, res, next) => {
         if (activationStartDate !== undefined) config.activationStartDate = activationStartDate;
         if (activationEndDate !== undefined) config.activationEndDate = activationEndDate;
         if (yearlyFee !== undefined) config.yearlyFee = Number(yearlyFee);
-        
+
         config.updatedBy = actorName;
         config.updatedOn = new Date();
-        
+
         await config.save();
 
         // Also update specific restaurantConfig yearlyFee if restaurantId is provided
@@ -233,9 +233,9 @@ const updateLicenseConfig = async (req, res, next) => {
                 yearlyFee: Number(yearlyFee),
                 updatedBy: actorName,
                 updatedOn: new Date()
-            }).catch(() => {});
+            }).catch(() => { });
         }
-        
+
         res.status(200).json({
             success: true,
             message: "System license and yearly fee updated successfully!",

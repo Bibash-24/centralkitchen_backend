@@ -8,9 +8,9 @@ const options = {
     definition: {
         openapi: "3.0.0",
         info: {
-            title: "Genvix POS API Documentation",
+            title: "DeliGati API Documentation",
             version: "1.0.0",
-            description: "API documentation for the Genvix Tech Point of Sale (POS). Requires Superadmin authentication.",
+            description: "API documentation for the DeliGati. Requires Superadmin authentication.",
         },
         servers: [
             {
@@ -94,7 +94,7 @@ const swaggerOptions = {
         .swagger-btn-logout:hover { background: rgba(239, 68, 68, 0.3) !important; }
     `,
     customJs: '/swagger-custom.js',
-    customSiteTitle: "API Documentation - Genvix POS",
+    customSiteTitle: "API Documentation - DeliGati",
     customfavIcon: "/favicon/favicon.ico"
 };
 
