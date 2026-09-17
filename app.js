@@ -190,6 +190,18 @@ const fetchTenantList = async () => {
             const actStart = comp.licenseStartDate ? new Date(comp.licenseStartDate).toISOString().split('T')[0] : (lic?.activationStartDate || trialStart);
             const actEnd = comp.licenseEndDate ? new Date(comp.licenseEndDate).toISOString().split('T')[0] : (lic?.activationEndDate || new Date(Date.now() + 365 * 86400000).toISOString().split('T')[0]);
 
+            if (comp.isDeleted === true) {
+                return {
+                    status: "REMOVED / DELETED",
+                    type: "REMOVED TENANT",
+                    validFrom: "N/A",
+                    validTo: "N/A",
+                    statusColor: "bg-rose-500/10 text-rose-500 border-rose-500/20",
+                    yearlyFee: comp.yearlyFee || 0,
+                    daysLeft: 0,
+                    isExpiringSoon: false
+                };
+            }
             let status = "INACTIVE / EXPIRED";
             let validFrom = trialStart;
             let validTo = trialEnd;
@@ -234,6 +246,7 @@ const fetchTenantList = async () => {
             tenantList.push({
                 _id: String(comp._id),
                 companySlug: comp.companySlug,
+                isDeleted: comp.isDeleted === true,
                 name: comp.name,
                 contactPhone: comp.contactPhone || "",
                 contactEmail: comp.contactEmail || "N/A",
@@ -269,6 +282,10 @@ const escapeHTML = (str) => {
 };
 
 const renderAdminDashboardHTML = ({ currentUser, tenantList, currentPath }) => {
+    // Sort tenants so active companies appear first
+    tenantList.sort((a, b) => (a.isDeleted === b.isDeleted ? 0 : a.isDeleted ? 1 : -1));
+    const activeTenants = tenantList.filter(t => !t.isDeleted);
+    const removedTenants = tenantList.filter(t => t.isDeleted);
     let activeCount = 0;
     let inactiveCount = 0;
     let expiringCount = 0;
@@ -379,7 +396,7 @@ const renderAdminDashboardHTML = ({ currentUser, tenantList, currentPath }) => {
                 if (el) el.innerText = val;
             };
 
-            setEl('detailsTenantName', d.name || 'Tenant System');
+            setEl('detailsTenantName', d.displayname || d.name || 'Tenant System');
             setEl('detailsCompanySlug', '/' + (d.companyslug || 'n/a'));
             setEl('detailsContact', d.contact || 'N/A');
             setEl('detailsEmail', d.email || 'N/A');
@@ -467,8 +484,8 @@ const renderAdminDashboardHTML = ({ currentUser, tenantList, currentPath }) => {
             <!-- 1. Total Tenants -->
             <div class="border p-3.5 sm:p-4 rounded-xl flex items-center justify-between transition-colors duration-300 bg-white dark:bg-[#1a1a1a] border-slate-200 dark:border-[#2a2a2a] shadow-xs">
                 <div>
-                    <p class="text-[10px] sm:text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-[#ababab]">Total Tenants</p>
-                    <h2 class="text-xl sm:text-2xl font-bold mt-1 text-slate-900 dark:text-[#f5f5f5]">${tenantList.length}</h2>
+                    <p class="text-[10px] sm:text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-[#ababab]">Active Tenants</p>
+                    <h2 class="text-xl sm:text-2xl font-bold mt-1 text-slate-900 dark:text-[#f5f5f5]">${activeTenants.length}</h2>
                 </div>
                 <div class="p-2.5 sm:p-3 bg-blue-500/10 text-blue-500 rounded-xl shrink-0 font-bold text-base">
                     🏢
@@ -512,13 +529,13 @@ const renderAdminDashboardHTML = ({ currentUser, tenantList, currentPath }) => {
         <!-- Action Bar (Showing count & Filter sub-tabs, identical to Inventory.jsx) -->
         <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 rounded-2xl border transition-colors duration-300 bg-white dark:bg-[#1a1a1a] border-slate-200 dark:border-[#2a2a2a] shadow-xs">
             <span id="showingCount" class="text-xs font-semibold whitespace-nowrap text-slate-500 dark:text-[#ababab]">
-                Showing ${tenantList.length} tenants
+                Showing ${activeTenants.length} active tenants
             </span>
 
             <!-- Interactive Sub-Tab Bar -->
             <div class="flex items-center gap-1.5 p-1 rounded-xl border overflow-x-auto scrollbar-hide w-full sm:w-auto bg-slate-100 dark:bg-[#1f1f1f] border-slate-200 dark:border-[#2a2a2a]">
                 <button id="tab-btn-all" onclick="filterTab('all')" class="tab-btn flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold cursor-pointer transition-all whitespace-nowrap bg-[#be3e3f] text-white">
-                    <span>All Tenants (${tenantList.length})</span>
+                    <span>All Tenants (${activeTenants.length})</span>
                 </button>
                 <button id="tab-btn-active" onclick="filterTab('active')" class="tab-btn flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold cursor-pointer transition-all whitespace-nowrap text-slate-600 dark:text-[#ababab] hover:text-black dark:hover:text-[#f5f5f5]">
                     <span>Activated (${activeCount})</span>
@@ -529,28 +546,34 @@ const renderAdminDashboardHTML = ({ currentUser, tenantList, currentPath }) => {
                 <button id="tab-btn-inactive" onclick="filterTab('inactive')" class="tab-btn flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold cursor-pointer transition-all whitespace-nowrap text-slate-600 dark:text-[#ababab] hover:text-black dark:hover:text-[#f5f5f5]">
                     <span>Inactive (${inactiveCount})</span>
                 </button>
+                <button id="tab-btn-removed" onclick="filterTab('removed')" class="tab-btn flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold cursor-pointer transition-all whitespace-nowrap text-slate-600 dark:text-[#ababab] hover:text-red-500 dark:hover:text-red-400">
+                    <span>🗑️ Removed Companies (${removedTenants.length})</span>
+                </button>
             </div>
         </div>
 
         <!-- Table View Container (Identical to Inventory.jsx & Vendors.jsx Table Design) -->
         <div class="border rounded-xl flex flex-col overflow-hidden w-full transition-colors duration-300 bg-white dark:bg-[#1a1a1a] border-slate-200 dark:border-[#2a2a2a] shadow-xs">
             <div class="overflow-x-auto">
-                <table className="w-full text-left border-collapse" style="width: 100%; border-collapse: collapse;">
+                <table class="w-full text-left border-collapse table-fixed min-w-[1000px]">
                     <thead>
-                        <tr class="border-b text-xs font-bold uppercase tracking-wider bg-slate-100 dark:bg-[#242424] border-slate-200 dark:border-[#2a2a2a] text-slate-700 dark:text-[#ababab]">
-                            <th class="py-4 pl-6 pr-2 text-center w-12">S.N.</th>
-                            <th class="p-4">Tenant / System Name</th>
-                            <th class="p-4">Company Slug</th>
-                            <th class="p-4">Contact & PAN</th>
-                            <th class="p-4">Address</th>
-                            <th class="p-4">License Status</th>
-                            <th class="p-4">Validity Range</th>
-                            <th class="p-4">Yearly Fee (रु)</th>
-                            
+                        <tr class="border-b text-xs font-bold uppercase tracking-wider bg-slate-100 dark:bg-[#242424] border-slate-200 dark:border-[#2a2a2a] text-slate-700 dark:text-[#ababab] divide-x divide-slate-200 dark:divide-[#2a2a2a]">
+                            <th class="align-middle py-3.5 px-3 text-left w-[5%]">S.N.</th>
+                            <th class="align-middle py-3.5 px-4 text-left w-[18%]">Tenant / System Name</th>
+                            <th class="align-middle py-3.5 px-4 text-left w-[16%]">Company Slug</th>
+                            <th class="align-middle py-3.5 px-4 text-left w-[15%]">Contact & PAN</th>
+                            <th class="align-middle py-3.5 px-4 text-left w-[17%]">Address</th>
+                            <th class="align-middle py-3.5 px-4 text-left w-[12%]">License Status</th>
+                            <th class="align-middle py-3.5 px-4 text-left w-[10%]">Validity Range</th>
+                            <th class="align-middle py-3.5 px-4 text-left w-[7%]">Yearly Fee</th>
                         </tr>
                     </thead>
                     <tbody id="tenantsTbody" class="divide-y divide-gray-200 dark:divide-[#262626] text-xs font-medium">
-                        ${tenantList.map((t, idx) => {
+                        ${(() => {
+                            let activeCounter = 0;
+                            let removedCounter = 0;
+                            return tenantList.map((t, idx) => {
+                                const displaySN = t.isDeleted ? ++removedCounter : ++activeCounter;
         const isAct = t.licenseStatus.includes('ACTIVE') || t.licenseStatus.includes('ACTIVATED');
         const cat = isAct ? 'active' : 'inactive';
         const safeName = escapeHTML(t.name);
@@ -567,9 +590,10 @@ const renderAdminDashboardHTML = ({ currentUser, tenantList, currentPath }) => {
         return `
                              <tr 
                                 onclick="openTenantDetailsModal(this)"
-                                class="tenant-row transition-colors cursor-pointer hover:bg-slate-500/10 text-slate-900 dark:text-[#f5f5f5]"
+                                class="tenant-row ${t.isDeleted ? 'hidden' : ''} transition-colors cursor-pointer hover:bg-slate-500/10 text-slate-900 dark:text-[#f5f5f5] divide-x divide-slate-200 dark:divide-[#2a2a2a]"
                                 data-id="${t._id}"
                                 data-name="${safeName.toLowerCase()}"
+                                data-displayname="${safeName}"
                                 data-companyslug="${safeCompanySlug}"
                                 data-contact="${safeContacts.toLowerCase()}"
                                 data-pan="${safePan.toLowerCase()}"
@@ -580,26 +604,27 @@ const renderAdminDashboardHTML = ({ currentUser, tenantList, currentPath }) => {
                                 data-fee="${t.yearlyFee}"
                                 data-category="${cat}"
                                 data-expiring="${t.isExpiringSoon ? 'true' : 'false'}"
+                                data-isdeleted="${t.isDeleted ? 'true' : 'false'}"
                                 title="Click to view tenant details"
                             >
-                                <td class="py-4 pl-6 pr-2 text-center font-bold text-xs">${idx + 1}</td>
-                                <td class="p-4">
-                                    <div class="font-bold text-sm line-clamp-1">${safeName}</div>
+                                <td class="align-middle sn-cell py-4 px-3 text-left font-bold text-xs">${displaySN}</td>
+                                <td class="align-middle p-4">
+                                    <div class="font-bold text-sm break-words leading-tight">${safeName}</div>
                                 </td>
-                                <td class="p-4 font-semibold">
-                                    <span class="px-2.5 py-1 rounded-md text-[10px] font-bold bg-slate-100 dark:bg-[#242424] border border-slate-200 dark:border-[#2a2a2a]">
+                                <td class="align-middle py-3.5 px-4 text-left font-semibold break-all">
+                                    <span class="inline-block px-2 py-1 rounded-md text-[10px] font-mono font-bold bg-slate-100 dark:bg-[#242424] border border-slate-200 dark:border-[#2a2a2a] break-all max-w-full">
                                         /${safeCompanySlug}
                                     </span>
                                 </td>
-                                <td class="p-4">
+                                <td class="align-middle p-4">
                                     <div class="font-bold text-primary dark:text-[#eb6975]">📞 ${safeContacts}</div>
                                     <div class="text-[10px] text-slate-400">PAN: ${safePan}</div>
                                 </td>
-                                <td class="p-4">
-                                    <div>📍 ${safeAddress}</div>
+                                <td class="align-middle p-4">
+                                    <div class="break-words leading-tight">📍 ${safeAddress}</div>
                                     <div class="text-[10px] text-slate-400">Symbol: ${safeCurrency}</div>
                                 </td>
-                                <td class="p-4">
+                                <td class="align-middle p-4">
                                     <span class="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${t.statusColor}">
                                         ${safeStatus}
                                     </span>
@@ -607,11 +632,11 @@ const renderAdminDashboardHTML = ({ currentUser, tenantList, currentPath }) => {
                                         <div class="text-[10px] font-extrabold text-amber-500 mt-1">⚠️ Ends in ${t.daysLeft} Days</div>
                                     ` : ''}
                                 </td>
-                                <td class="p-4">
+                                <td class="align-middle p-4">
                                     <div class="text-[11px] font-semibold">${safeFrom} &rarr; ${safeTo}</div>
                                     <div class="text-[10px] text-blue-500 font-bold uppercase">${safeType}</div>
                                 </td>
-                                <td class="p-4">
+                                <td class="align-middle p-4">
                                     <span id="fee-display-${t._id}" class="font-black text-emerald-600 dark:text-emerald-400 text-sm">
                                         रु ${Number(t.yearlyFee).toLocaleString()}
                                     </span>
@@ -619,7 +644,8 @@ const renderAdminDashboardHTML = ({ currentUser, tenantList, currentPath }) => {
                                 
                             </tr>
                             `;
-    }).join('')}
+                            }).join('');
+                        })()}
                     </tbody>
                 </table>
             </div>
@@ -721,6 +747,9 @@ const renderAdminDashboardHTML = ({ currentUser, tenantList, currentPath }) => {
     <script>
         let currentTabCategory = 'all';
 
+        document.addEventListener('DOMContentLoaded', () => {
+            filterTenants();
+        });
         function filterTenants() {
             const query = (document.getElementById('searchInput').value || '').toLowerCase().trim();
             const rows = document.querySelectorAll('.tenant-row');
@@ -732,17 +761,21 @@ const renderAdminDashboardHTML = ({ currentUser, tenantList, currentPath }) => {
                 const pan = (row.getAttribute('data-pan') || '').toLowerCase();
                 const cat = row.getAttribute('data-category');
                 const isExpiring = row.getAttribute('data-expiring') === 'true';
+                const isDeleted = row.getAttribute('data-isdeleted') === 'true';
 
                 const matchesSearch = !query || name.includes(query) || contact.includes(query) || pan.includes(query);
                 
                 let matchesCategory = false;
-                if (currentTabCategory === 'all') matchesCategory = true;
-                else if (currentTabCategory === 'active') matchesCategory = (cat === 'active');
-                else if (currentTabCategory === 'expiring') matchesCategory = isExpiring;
-                else if (currentTabCategory === 'inactive') matchesCategory = (cat === 'inactive');
+                if (currentTabCategory === 'all') matchesCategory = !isDeleted;
+                else if (currentTabCategory === 'active') matchesCategory = (!isDeleted && cat === 'active');
+                else if (currentTabCategory === 'expiring') matchesCategory = (!isDeleted && isExpiring);
+                else if (currentTabCategory === 'inactive') matchesCategory = (!isDeleted && cat === 'inactive');
+                else if (currentTabCategory === 'removed') matchesCategory = isDeleted;
 
                 if (matchesSearch && matchesCategory) {
                     row.classList.remove('hidden');
+                    const snCell = row.querySelector('.sn-cell');
+                    if (snCell) snCell.innerText = count + 1;
                     count++;
                 } else {
                     row.classList.add('hidden');
@@ -750,7 +783,13 @@ const renderAdminDashboardHTML = ({ currentUser, tenantList, currentPath }) => {
             });
 
             const countEl = document.getElementById('showingCount');
-            if (countEl) countEl.innerText = 'Showing ' + count + ' tenants';
+            if (countEl) {
+                if (currentTabCategory === 'removed') {
+                    countEl.innerText = 'Showing ' + count + ' removed companies';
+                } else {
+                    countEl.innerText = 'Showing ' + count + ' active tenants';
+                }
+            }
         }
 
         function filterTab(category) {
@@ -761,7 +800,11 @@ const renderAdminDashboardHTML = ({ currentUser, tenantList, currentPath }) => {
             });
             const activeBtn = document.getElementById('tab-btn-' + category);
             if (activeBtn) {
+            if (category === 'removed') {
+                activeBtn.className = 'tab-btn flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold cursor-pointer transition-all whitespace-nowrap bg-red-600 text-white';
+            } else {
                 activeBtn.className = 'tab-btn flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold cursor-pointer transition-all whitespace-nowrap bg-[#be3e3f] text-white';
+            }
             }
 
             filterTenants();
