@@ -73,7 +73,8 @@ const isVerifiedUser = async (req, res, next) => {
 };
 
 const isAdmin = (req, res, next) => {
-    if (req.user && (req.user.role === "Admin" || req.user.role === "Superadmin")) {
+    const roleLower = String(req.user?.role || "").toLowerCase().trim();
+    if (req.user && (roleLower === "admin" || roleLower === "superadmin" || roleLower === "company admin")) {
         next();
     } else {
         next(createHttpError(403, "Forbidden. Admin access required."));

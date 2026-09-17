@@ -1,97 +1,79 @@
 const RolePermission = require("../../models/superadmin/rolePermissionModel");
-const User = require("../../models/user/userModel");
 const createHttpError = require("http-errors");
 
-// Fetch active role permissions (auto-seed if empty or missing new schema fields)
+const defaultRolesList = [
+    {
+        role: "Admin",
+        allowedMenus: ["home", "orders", "tables", "sales", "expenses", "accounts", "customers", "vendors", "creditors", "inventory", "menuSetup", "tableSetup", "settings", "reports", "support"],
+        allowedSubMenus: ["home-boh", "home-date-filter", "home-popular-dishes", "home-revenue-breakdown", "home-payment-mix", "home-expense-trend", "home-expense-breakdown", "home-creditors-ledger", "items", "categories", "details", "ratios", "users", "permissions", "sales-revenue", "financial-payments", "stock-inventory", "expenses-costs", "profitability", "support-guide", "issues"]
+    }
+];
+
 const getRolePermissions = async (req, res, next) => {
     try {
-        let permissions = await RolePermission.find({ isDeleted: { $ne: true } });
+        const querySlug = req.query.companySlug;
+        const userSlug = req.user ? req.user.companySlug : null;
+        const targetSlug = querySlug || (req.user && req.user.role !== "Superadmin" ? userSlug : "global") || "global";
 
-        // Dynamically fetch all user roles currently assigned to users
-        const assignedRoles = await User.distinct("role", {
-            isDeleted: { $ne: true },
-            role: { $exists: true, $ne: null, $ne: "" }
-        });
+        let permissions = await RolePermission.find({ companySlug: targetSlug, isDeleted: { $ne: true } });
 
-        // Combine assigned roles with default system roles to verify (all lowercase for robustness)
-        const allSystemRoles = Array.from(new Set([...assignedRoles, "Admin"].map(r => r.toLowerCase())));
+        if (!permissions || permissions.length === 0) {
+            let companyEnabledModules = null;
+            if (targetSlug !== "global") {
+                const Company = require("../../models/company/companyModel");
+                const compDoc = await Company.findOne({ companySlug: targetSlug, isDeleted: { $ne: true } });
+                if (compDoc && Array.isArray(compDoc.enabledModules) && compDoc.enabledModules.length > 0) {
+                    companyEnabledModules = compDoc.enabledModules;
+                }
+            }
 
-        // Check if DB is empty
-        const needsSeed = permissions.length === 0;
-
-        if (needsSeed) {
-            // If completely empty, seed defaults
-            const defaults = [
-                {
-                    role: "Admin",
-                    allowedMenus: ["home", "orders", "tables", "sales", "expenses", "accounts", "customers", "vendors", "creditors", "inventory", "menuSetup", "tableSetup", "settings", "reports"],
-                    allowedSubMenus: ["items", "categories", "combos", "qr", "timings", "details", "ratios", "users", "inventory-list", "directory", "list", "vendors-directory", "home-foh", "home-popular-dishes", "duplicateTable", "sales-revenue", "financial-payments", "stock-inventory", "expenses-costs", "profitability"],
+            const defaults = defaultRolesList.map(item => {
+                let allowedMenus = item.allowedMenus;
+                if (companyEnabledModules && companyEnabledModules.length > 0) {
+                    allowedMenus = allowedMenus.filter(m => m === "settings" || m === "support" || companyEnabledModules.includes(m));
+                }
+                return {
+                    companySlug: targetSlug,
+                    role: item.role,
+                    allowedMenus,
+                    allowedSubMenus: item.allowedSubMenus,
                     createdBy: "System",
                     createdOn: new Date(),
                     updatedBy: "System",
                     updatedOn: new Date()
-                }
-            ];
+                };
+            });
 
-            // Dynamically append any other roles currently assigned to users in the DB
-            for (const userRole of assignedRoles) {
-                const existsInDefaults = defaults.some(d => d.role.toLowerCase() === userRole.toLowerCase());
-                if (!existsInDefaults) {
-                    defaults.push({
-                        role: userRole,
-                        allowedMenus: ["home", "orders", "tables", "sales", "expenses", "accounts", "customers", "vendors", "creditors", "inventory", "menuSetup", "tableSetup", "settings"],
-                        allowedSubMenus: ["items", "categories", "combos", "qr", "timings", "details", "inventory-list", "directory", "list", "vendors-directory", "home-foh", "home-popular-dishes"],
-                        createdBy: "System",
-                        createdOn: new Date(),
-                        updatedBy: "System",
-                        updatedOn: new Date()
-                    });
-                }
-            }
-            await RolePermission.insertMany(defaults);
-            permissions = await RolePermission.find({ isDeleted: { $ne: true } });
-        } else {
-            // Check if any assigned user role is missing from permissions DB entirely
-            let createdNew = false;
-            for (const userRole of assignedRoles) {
-                const exists = permissions.some(p => p.role.toLowerCase() === userRole.toLowerCase());
-                if (!exists) {
-                    const newPermission = new RolePermission({
-                        role: userRole,
-                        allowedMenus: ["home", "orders", "tables", "sales", "expenses", "accounts", "customers", "vendors", "creditors", "inventory", "menuSetup", "tableSetup", "settings"],
-                        allowedSubMenus: ["items", "categories", "combos", "qr", "timings", "details", "inventory-list", "directory", "list", "vendors-directory", "home-foh", "home-popular-dishes"],
-                        createdBy: "System",
-                        createdOn: new Date()
-                    });
-                    await newPermission.save();
-                    createdNew = true;
-                }
-            }
-            if (createdNew) {
-                permissions = await RolePermission.find({ isDeleted: { $ne: true } });
-            }
+            try {
+                await RolePermission.insertMany(defaults, { ordered: false });
+            } catch (e) {}
+
+            permissions = await RolePermission.find({ companySlug: targetSlug, isDeleted: { $ne: true } });
         }
 
         res.status(200).json({
             success: true,
             message: "Role permissions retrieved successfully!",
-            data: permissions
+            data: permissions,
+            companySlug: targetSlug
         });
     } catch (error) {
         next(error);
     }
 };
 
-// Update role permissions configurations (Superadmin can update all; Admin can only update below it)
 const updateRolePermissions = async (req, res, next) => {
     try {
         const updates = req.body || {};
+        const querySlug = req.query.companySlug;
+        const userSlug = req.user ? req.user.companySlug : null;
+        const targetSlug = querySlug || (req.user && req.user.role !== "Superadmin" ? userSlug : "global") || "global";
+
         const updaterRole = req.user ? req.user.role : "Superadmin";
         const updaterName = req.user ? (req.user.email || String(req.user.phone || req.user.role)) : "System";
 
         let adminAllowedMenus = null;
 
-        // Enforce hierarchy check for Admin users
         if (updaterRole && updaterRole.toLowerCase() === "admin") {
             const forbiddenKeys = Object.keys(updates).filter(roleKey => 
                 roleKey.toLowerCase() === "admin" || roleKey.toLowerCase() === "superadmin"
@@ -100,8 +82,8 @@ const updateRolePermissions = async (req, res, next) => {
                 return next(createHttpError(403, "Forbidden. Admins can only change permissions for roles below them."));
             }
 
-            // Fetch Admin's own allowed menus to ensure Admin cannot grant unassigned menus
             const adminPerm = await RolePermission.findOne({ 
+                companySlug: targetSlug,
                 role: { $regex: /^admin$/i }, 
                 isDeleted: { $ne: true } 
             });
@@ -113,12 +95,10 @@ const updateRolePermissions = async (req, res, next) => {
                 let allowedMenus = config.allowedMenus || [];
                 let allowedSubMenus = config.allowedSubMenus || [];
 
-                // If updated by Admin, filter allowedMenus to strictly be a subset of adminAllowedMenus
                 if (updaterRole && updaterRole.toLowerCase() === "admin" && Array.isArray(adminAllowedMenus)) {
                     allowedMenus = allowedMenus.filter(m => m === "settings" || adminAllowedMenus.includes(m));
                 }
 
-                // Fallback guarantee: Settings and Details tab must always be allowed
                 if (!allowedMenus.includes("settings")) {
                     allowedMenus = ["settings", ...allowedMenus];
                 }
@@ -126,13 +106,14 @@ const updateRolePermissions = async (req, res, next) => {
                     allowedSubMenus = ["details", ...allowedSubMenus];
                 }
 
-                const escapedRole = role.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const escapedRole = role.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
                 let perm = await RolePermission.findOne({ 
+                    companySlug: targetSlug,
                     role: { $regex: new RegExp("^" + escapedRole + "$", "i") }, 
                     isDeleted: { $ne: true } 
                 });
                 if (!perm) {
-                    perm = new RolePermission({ role, createdBy: updaterName, createdOn: new Date() });
+                    perm = new RolePermission({ companySlug: targetSlug, role, createdBy: updaterName, createdOn: new Date() });
                 } else if (perm.isDeleted) {
                     perm.isDeleted = false;
                     perm.deletedBy = undefined;
@@ -140,20 +121,21 @@ const updateRolePermissions = async (req, res, next) => {
                 }
                 perm.allowedMenus = allowedMenus;
                 perm.allowedSubMenus = allowedSubMenus;
-                perm.markModified('allowedMenus');
-                perm.markModified('allowedSubMenus');
+                perm.markModified("allowedMenus");
+                perm.markModified("allowedSubMenus");
                 perm.updatedBy = updaterName;
                 perm.updatedOn = new Date();
                 await perm.save();
             }
         }
 
-        const permissions = await RolePermission.find({ isDeleted: { $ne: true } });
+        const permissions = await RolePermission.find({ companySlug: targetSlug, isDeleted: { $ne: true } });
 
         res.status(200).json({
             success: true,
             message: "Role permissions updated successfully!",
-            data: permissions
+            data: permissions,
+            companySlug: targetSlug
         });
     } catch (error) {
         next(error);
@@ -163,15 +145,17 @@ const updateRolePermissions = async (req, res, next) => {
 const deleteRolePermission = async (req, res, next) => {
     try {
         const { role } = req.params;
+        const querySlug = req.query.companySlug;
+        const userSlug = req.user ? req.user.companySlug : null;
+        const targetSlug = querySlug || (req.user && req.user.role !== "Superadmin" ? userSlug : "global") || "global";
+
         const updaterRole = req.user ? req.user.role : "Superadmin";
 
-        // Enforce system roles cannot be deleted
         if (["superadmin", "admin"].includes(role.toLowerCase())) {
             const error = createHttpError(400, "System roles cannot be deleted!");
             return next(error);
         }
 
-        // Enforce hierarchy check: Only Superadmin and Admin can delete roles
         const checkRole = (updaterRole || "").toLowerCase();
         if (checkRole !== "superadmin" && checkRole !== "admin") {
             const error = createHttpError(403, "Forbidden. Only Superadmin or Admin can delete roles.");
@@ -180,9 +164,9 @@ const deleteRolePermission = async (req, res, next) => {
 
         const updaterName = req.user ? (req.user.email || String(req.user.phone || req.user.role)) : "System";
         const deleted = await RolePermission.findOneAndUpdate(
-            { role, isDeleted: { $ne: true } },
+            { companySlug: targetSlug, role, isDeleted: { $ne: true } },
             {
-                role: `${role}_deleted_${Date.now()}`,
+                role: role + "_deleted_" + Date.now(),
                 isDeleted: true,
                 deletedBy: updaterName,
                 deletedOn: new Date()
@@ -196,7 +180,7 @@ const deleteRolePermission = async (req, res, next) => {
 
         res.status(200).json({
             success: true,
-            message: `Role '${role}' deleted successfully.`
+            message: "Role '" + role + "' deleted successfully for company " + targetSlug + "."
         });
     } catch (error) {
         next(error);

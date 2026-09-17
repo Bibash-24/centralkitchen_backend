@@ -113,7 +113,13 @@ const router = express.Router();
  *                 data:
  *                   $ref: '#/components/schemas/RestaurantConfig'
  */
-router.route("/").get(getRestaurantConfig);
+const optionalAuth = (req, res, next) => {
+    isVerifiedUser(req, res, (err) => {
+        next();
+    });
+};
+
+router.route("/").get(optionalAuth, getRestaurantConfig);
 
 /**
  * @swagger

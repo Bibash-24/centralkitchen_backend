@@ -7,7 +7,7 @@ const config = require("../../config/config");
 
 const register = async (req, res, next) => {
     try {
-        const { name, phone, email, password, role, pin, confirmPin, isApproved: reqIsApproved } = req.body || {};
+        const { name, phone, email, password, role, pin, confirmPin, isApproved: reqIsApproved, companySlug: reqCompanySlug } = req.body || {};
 
         if (!name || !phone || !email || !password) {
             const error = createHttpError(400, "All fields (name, phone, email, password) are required!");
@@ -42,7 +42,8 @@ const register = async (req, res, next) => {
 
         const createdBy = (req.user && (req.user.email || req.user.phone)) ? (req.user.email || String(req.user.phone)) : "Self Registered";
         const isApproved = reqIsApproved || (createdBy !== "Self Registered" ? "approved" : "pending");
-        const newUser = new User({ name, phone, email, password, role: role || "", companySlug, pin: cleanPin || undefined, createdBy, isApproved });
+        const targetCompanySlug = reqCompanySlug || (req.headers && req.headers["x-company-slug"]) || (req.user && req.user.companySlug) || "main-kitchen";
+        const newUser = new User({ name: name.trim(), phone, email: email.toLowerCase().trim(), password, role: role || "", companySlug: targetCompanySlug, pin: cleanPin || undefined, createdBy, isApproved });
         await newUser.save();
 
         // Convert to object and exclude sensitive data
@@ -259,19 +260,50 @@ const logout = async (req, res, next) => {
 
 const getAllUsers = async (req, res, next) => {
     try {
-        const users = await User.find({ isDeleted: { $ne: true } }).select("-password -__v");
+        let userQuery = { isDeleted: { $nin: [true, "true"] } };
 
-        let allUsers = [...users];
+        // If requester is not Superadmin, filter users list by their company slug
+        if (req.user && req.user.role !== "Superadmin") {
+            const requesterSlug = (req.user.companySlug || (req.headers && req.headers["x-company-slug"]) || "").toLowerCase().trim();
+            if (requesterSlug) {
+                userQuery.companySlug = { $regex: new RegExp("^" + requesterSlug + "$", "i") };
+            }
+        }
+
+        // Get all active (non-deleted) companies
+        const Company = require("../../models/company/companyModel");
+        const activeCompanies = await Company.find({ isDeleted: { $ne: true } }).select("companySlug");
+        const activeSlugSet = new Set();
+        activeCompanies.forEach(c => {
+            if (c.companySlug) {
+                const clean = c.companySlug.toLowerCase().trim();
+                activeSlugSet.add(clean);
+                const root = clean.replace(/-deleted-\d+$/, '');
+                activeSlugSet.add(root);
+            }
+        });
+
+        const users = await User.find(userQuery).select("-password -__v");
+
+        // Filter out users belonging to soft-deleted companies
+        const validUsers = users.filter(u => {
+            if (!u.companySlug) return true;
+            const uSlug = u.companySlug.toLowerCase().trim();
+            const root = uSlug.replace(/-deleted-\d+$/, '');
+            return activeSlugSet.has(uSlug) || activeSlugSet.has(root);
+        });
+
+        let allUsers = [...validUsers];
 
         // Only include Superadmin records if the requester is a Superadmin
         if (req.user && req.user.role === "Superadmin") {
-            const superadmins = await Superadmin.find({}).select("-password -__v");
+            const superadmins = await Superadmin.find({ isDeleted: { $nin: [true, "true"] } }).select("-password -__v");
             allUsers = [...allUsers, ...superadmins];
         }
 
         res.status(200).json({
             success: true,
-            message: "All users retrieved successfully!",
+            message: "Users retrieved successfully!",
             data: allUsers
         });
     } catch (error) {
@@ -293,6 +325,16 @@ const toggleAccess = async (req, res, next) => {
         if (!user) {
             const error = createHttpError(404, "User not found!");
             return next(error);
+        }
+
+        // Security guard: Non-superadmin users can only modify access for users of their own company
+        if (req.user && req.user.role !== "Superadmin") {
+            const requesterSlug = (req.user.companySlug || (req.headers && req.headers["x-company-slug"]) || "").toLowerCase().trim();
+            const userSlug = (user.companySlug || "").toLowerCase().trim();
+            if (requesterSlug && userSlug && requesterSlug !== userSlug) {
+                const error = createHttpError(403, "Forbidden. You cannot modify users from another company.");
+                return next(error);
+            }
         }
 
         user.allowed = !user.allowed;
@@ -487,6 +529,16 @@ const adminUpdateUser = async (req, res, next) => {
             return next(error);
         }
 
+        // Security guard: Non-superadmin users can only edit details for users of their own company
+        if (req.user && req.user.role !== "Superadmin") {
+            const requesterSlug = (req.user.companySlug || (req.headers && req.headers["x-company-slug"]) || "").toLowerCase().trim();
+            const userSlug = (user.companySlug || "").toLowerCase().trim();
+            if (requesterSlug && userSlug && requesterSlug !== userSlug) {
+                const error = createHttpError(403, "Forbidden. You cannot modify users from another company.");
+                return next(error);
+            }
+        }
+
         // Enforce role hierarchy check for editing user details
         if (req.user.role === "Admin") {
             const isSelfUpdate = String(user._id) === String(req.user._id);
@@ -626,6 +678,16 @@ const deleteUser = async (req, res, next) => {
         if (!user || user.isDeleted) {
             const error = createHttpError(404, "User not found!");
             return next(error);
+        }
+
+        // Security guard: Non-superadmin users can only delete users of their own company
+        if (req.user && req.user.role !== "Superadmin") {
+            const requesterSlug = (req.user.companySlug || (req.headers && req.headers["x-company-slug"]) || "").toLowerCase().trim();
+            const userSlug = (user.companySlug || "").toLowerCase().trim();
+            if (requesterSlug && userSlug && requesterSlug !== userSlug) {
+                const error = createHttpError(403, "Forbidden. You cannot delete users from another company.");
+                return next(error);
+            }
         }
 
         // Enforce role hierarchy check for deletion

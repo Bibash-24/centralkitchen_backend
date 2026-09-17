@@ -1,10 +1,15 @@
 const mongoose = require("mongoose");
 
 const rolePermissionSchema = new mongoose.Schema({
-    role: {
+    companySlug: {
         type: String,
         required: true,
-        unique: true
+        default: "global",
+        index: true
+    },
+    role: {
+        type: String,
+        required: true
     },
     allowedMenus: {
         type: [String],
@@ -43,5 +48,7 @@ const rolePermissionSchema = new mongoose.Schema({
         required: false
     }
 }, { timestamps: true });
+
+rolePermissionSchema.index({ companySlug: 1, role: 1 }, { unique: true });
 
 module.exports = mongoose.model("RolePermission", rolePermissionSchema);
