@@ -1,5 +1,5 @@
 const express = require("express");
-const { superadminLogin, getActiveTenants, getLicenseConfig, updateLicenseConfig } = require("../../controllers/superadmin/superadminController");
+const { superadminLogin, getActiveTenants, getLicenseConfig, updateLicenseConfig, getGlobalModules, updateGlobalModules } = require("../../controllers/superadmin/superadminController");
 const { isVerifiedUser, isSuperadmin } = require("../../middlewares/tokenVerification");
 const router = express.Router();
 
@@ -245,3 +245,7 @@ router.route("/license").patch(isVerifiedUser, isSuperadmin, updateLicenseConfig
 router.route("/active-tenants").get(isVerifiedUser, isSuperadmin, getActiveTenants);
 
 module.exports = router;
+
+router.route("/global-modules").get(getGlobalModules);
+router.route("/global-modules").patch(isVerifiedUser, isSuperadmin, updateGlobalModules);
+router.route("/global-modules").put(isVerifiedUser, isSuperadmin, updateGlobalModules);

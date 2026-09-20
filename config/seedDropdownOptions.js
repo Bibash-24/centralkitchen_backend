@@ -24,7 +24,7 @@ const defaultOptions = [
     // Payment Method
     { name: "Cash", value: "Cash", usedFor: "payment_method" },
     { name: "Online", value: "Online", usedFor: "payment_method" },
-    { name: "Card", value: "Card", usedFor: "payment_method" },
+    { name: "Credit", value: "Credit", usedFor: "payment_method" },
     { name: "Cheque", value: "Cheque", usedFor: "payment_method" },
 
     // Inventory Unit

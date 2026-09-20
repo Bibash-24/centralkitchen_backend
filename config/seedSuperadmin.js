@@ -1,4 +1,5 @@
 const Superadmin = require("../models/superadmin/superadminModel");
+const seedSuperadminPermissions = require("./seedSuperadminPermissions");
 
 const seedSuperadmin = async () => {
     try {
@@ -18,6 +19,10 @@ const seedSuperadmin = async () => {
         } else {
             console.log("Superadmin account already exists.");
         }
+
+        // Seed Superadmin Role Permissions with full access to all modules and submodules
+        await seedSuperadminPermissions();
+
     } catch (error) {
         console.error("Error seeding Superadmin:", error.message);
     }

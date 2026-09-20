@@ -1,3 +1,4 @@
+const GlobalModuleConfig = require("../../models/superadmin/globalModuleConfigModel");
 const Company = require("../../models/company/companyModel");
 const LicenseConfig = require("../../models/superadmin/licenseModel");
 const Superadmin = require("../../models/superadmin/superadminModel");
@@ -246,4 +247,48 @@ const updateLicenseConfig = async (req, res, next) => {
     }
 };
 
-module.exports = { superadminLogin, getActiveTenants, getLicenseConfig, updateLicenseConfig };
+
+const getGlobalModules = async (req, res, next) => {
+    try {
+        let config = await GlobalModuleConfig.findOne({ key: "global_modules_config" });
+        if (!config) {
+            config = await GlobalModuleConfig.create({ key: "global_modules_config" });
+        }
+        res.status(200).json({
+            success: true,
+            message: "Global module configuration retrieved successfully!",
+            data: config
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+const updateGlobalModules = async (req, res, next) => {
+    try {
+        const { enabledModules, enabledSubMenus } = req.body || {};
+        const actorName = req.user?.email || req.user?.name || "Superadmin";
+
+        let config = await GlobalModuleConfig.findOneAndUpdate(
+            { key: "global_modules_config" },
+            {
+                $set: {
+                    ...(Array.isArray(enabledModules) ? { enabledModules } : {}),
+                    ...(Array.isArray(enabledSubMenus) ? { enabledSubMenus } : {}),
+                    updatedBy: actorName
+                }
+            },
+            { upsert: true, returnDocument: 'after' }
+        );
+
+        res.status(200).json({
+            success: true,
+            message: "Global system modules updated successfully in dedicated collection!",
+            data: config
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+module.exports = { getGlobalModules, updateGlobalModules,  superadminLogin, getActiveTenants, getLicenseConfig, updateLicenseConfig };

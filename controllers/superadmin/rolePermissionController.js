@@ -4,7 +4,7 @@ const createHttpError = require("http-errors");
 const defaultRolesList = [
     {
         role: "Admin",
-        allowedMenus: ["home", "orders", "tables", "sales", "expenses", "accounts", "customers", "vendors", "creditors", "inventory", "menuSetup", "tableSetup", "settings", "reports", "support"],
+        allowedMenus: ["home", "orders", "sales", "expenses", "accounts", "customers", "vendors", "creditors", "inventory", "menuSetup", "settings", "reports", "support"],
         allowedSubMenus: ["home-boh", "home-date-filter", "home-popular-dishes", "home-revenue-breakdown", "home-payment-mix", "home-expense-trend", "home-expense-breakdown", "home-creditors-ledger", "items", "categories", "details", "ratios", "users", "permissions", "sales-revenue", "financial-payments", "stock-inventory", "expenses-costs", "profitability", "support-guide", "issues"]
     }
 ];
@@ -92,7 +92,7 @@ const updateRolePermissions = async (req, res, next) => {
 
         for (const [role, config] of Object.entries(updates)) {
             if (config && (Array.isArray(config.allowedMenus) || Array.isArray(config.allowedSubMenus))) {
-                let allowedMenus = config.allowedMenus || [];
+                let allowedMenus = (config.allowedMenus || []).filter(m => m !== "tables" && m !== "tableSetup");
                 let allowedSubMenus = config.allowedSubMenus || [];
 
                 if (updaterRole && updaterRole.toLowerCase() === "admin" && Array.isArray(adminAllowedMenus)) {

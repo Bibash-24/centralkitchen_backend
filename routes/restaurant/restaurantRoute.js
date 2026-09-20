@@ -21,7 +21,7 @@ const router = express.Router();
  *         name:
  *           type: string
  *           description: Name of the restaurant
- *           example: "Chiya Town POS"
+ *           example: ""
  *         contactNumbers:
  *           type: array
  *           items:
@@ -31,11 +31,11 @@ const router = express.Router();
  *         address:
  *           type: string
  *           description: Physical address
- *           example: "Mid Baneshwor, Kathmandu, Nepal"
+ *           example: ""
  *         panNumber:
  *           type: string
  *           description: PAN/VAT registration number
- *           example: "609548231"
+ *           example: ""
  *         defaultCurrency:
  *           type: string
  *           description: Default currency symbol
@@ -59,7 +59,7 @@ const router = express.Router();
  *         slogan:
  *           type: string
  *           description: Slogan or tagline for print templates
- *           example: "Fresh flavors, delivered to your table"
+ *           example: ""
  *         creditEnabled:
  *           type: boolean
  *           description: Toggle if credit transactions system is enabled restaurant-wide

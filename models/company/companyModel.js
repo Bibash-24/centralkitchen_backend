@@ -6,6 +6,12 @@ const companySchema = new mongoose.Schema({
     required: true,
     trim: true
   },
+  orderNoPrefix: {
+    type: String
+  },
+  counterTicker: {
+    type: Number
+  },
   companySlug: {
     type: String,
     required: true,
@@ -16,22 +22,18 @@ const companySchema = new mongoose.Schema({
   },
   contactEmail: {
     type: String,
-    default: "",
     trim: true
   },
   contactPhone: {
     type: String,
-    default: "",
     trim: true
   },
   address: {
     type: String,
-    default: "Mid Baneshwor, Kathmandu, Nepal",
     trim: true
   },
   panNumber: {
     type: String,
-    default: "609548231",
     trim: true
   },
   defaultCurrency: {
@@ -40,32 +42,25 @@ const companySchema = new mongoose.Schema({
     trim: true
   },
   openingTime: {
-    type: String,
-    default: "08:00 AM"
+    type: String
   },
   closingTime: {
-    type: String,
-    default: "09:00 PM"
+    type: String
   },
   isVatApplicable: {
-    type: Boolean,
-    default: true
+    type: Boolean
   },
   vatPercentage: {
-    type: Number,
-    default: 13
+    type: Number
   },
   logo: {
-    type: String,
-    default: ""
+    type: String
   },
   paymentQrCode: {
-    type: String,
-    default: ""
+    type: String
   },
   yearlyFee: {
-    type: Number,
-    default: 25000
+    type: Number
   },
   isActive: {
     type: Boolean,
@@ -76,33 +71,29 @@ const companySchema = new mongoose.Schema({
     default: false
   },
   deletedBy: {
-    type: String,
-    default: ""
+    type: String
   },
   deletedAt: {
-    type: Date,
-    default: null
+    type: Date
   },
   enabledModules: {
-    type: [String],
-    default: []
+    type: [String]
+  },
+  enabledSubMenus: {
+    type: [String]
   },
   licenseStatus: {
     type: String,
-    enum: ["Activated", "Trial"],
-    default: "Activated"
+    enum: ["Activated", "Trial"]
   },
   licenseStartDate: {
-    type: Date,
-    default: null
+    type: Date
   },
   licenseEndDate: {
-    type: Date,
-    default: null
+    type: Date
   },
   createdBy: {
-    type: String,
-    default: "Superadmin"
+    type: String
   }
 }, { timestamps: true });
 

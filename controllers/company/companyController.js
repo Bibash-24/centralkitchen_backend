@@ -1,3 +1,6 @@
+const GlobalModuleConfig = require("../../models/superadmin/globalModuleConfigModel");
+const Counter = require("../../models/counter/counterModel");
+const RestaurantConfig = require("../../models/restaurant/restaurantModel");
 const LicenseConfig = require("../../models/superadmin/licenseModel");
 const Company = require("../../models/company/companyModel");
 const User = require("../../models/user/userModel");
@@ -5,7 +8,7 @@ const User = require("../../models/user/userModel");
 // Create new incorporated company (Superadmin only)
 const createCompany = async (req, res, next) => {
     try {
-        const { name, companySlug, contactEmail, contactPhone, enabledModules, adminName, adminPassword, adminPin, licenseStatus, licenseStartDate, licenseEndDate, yearlyFee } = req.body;
+        const { name, companySlug, contactEmail, contactPhone, enabledModules, enabledSubMenus, adminName, adminPassword, adminPin, licenseStatus, licenseStartDate, licenseEndDate, yearlyFee, orderNoPrefix, counterTicker } = req.body;
 
         if (!name || !companySlug) {
             return res.status(400).json({ success: false, message: "Company name and company slug are required." });
@@ -19,14 +22,22 @@ const createCompany = async (req, res, next) => {
             return res.status(400).json({ success: false, message: "Company slug '" + cleanedSlug + "' is already taken." });
         }
 
-        const actorName = req.user ? (req.user.name || req.user.username) : "Superadmin";
+        const actorName = req.user ? (req.user.name || req.user.email || req.user.username || req.user.role) : "Superadmin";
+
+        const finalPrefix = (orderNoPrefix || "CK").trim().toUpperCase();
+        const finalTicker = !isNaN(Number(counterTicker)) ? Number(counterTicker) : 1;
+        const companyModules = Array.isArray(enabledModules) ? enabledModules : [];
+        const companySubMenus = Array.isArray(enabledSubMenus) ? enabledSubMenus : [];
 
         const newCompany = new Company({
             name,
             companySlug: cleanedSlug,
             contactEmail: contactEmail || "",
             contactPhone: contactPhone || "",
-            enabledModules: Array.isArray(enabledModules) ? enabledModules : [],
+            enabledModules: companyModules,
+            enabledSubMenus: companySubMenus,
+            orderNoPrefix: finalPrefix,
+            counterTicker: finalTicker,
             yearlyFee: Number(yearlyFee) || 0,
             licenseStatus: licenseStatus || "Activated",
             licenseStartDate: licenseStartDate ? new Date(licenseStartDate) : null,
@@ -35,6 +46,31 @@ const createCompany = async (req, res, next) => {
         });
 
         await newCompany.save();
+
+        // Save orderNoPrefix & counterTicker to RestaurantConfig
+        await RestaurantConfig.findOneAndUpdate(
+            { companySlug: cleanedSlug },
+            {
+                $set: {
+                    companySlug: cleanedSlug,
+                    name,
+                    enabledModules: companyModules,
+                    enabledSubMenus: companySubMenus,
+                    orderNoPrefix: finalPrefix,
+                    counterTicker: finalTicker,
+                    orderCounter: finalTicker
+                }
+            },
+            { upsert: true, new: true }
+        );
+
+        // Save counter sequence to Counter collection
+        const seqVal = Math.max(0, finalTicker - 1);
+        await Counter.findOneAndUpdate(
+            { _id: { companySlug: cleanedSlug, seqName: "orderNo" } },
+            { $set: { seq: seqVal } },
+            { upsert: true, new: true }
+        );
         
         // Save slug-wise LicenseConfig document in DB
         await LicenseConfig.findOneAndUpdate(
@@ -65,7 +101,7 @@ const createCompany = async (req, res, next) => {
 
             if (!existingUser && !isNaN(cleanPhone) && String(cleanPhone).length === 10) {
                 const newAdmin = new User({
-                    name: adminName || (name + " Admin"),
+                    name: adminName || name,
                     email: cleanEmail,
                     phone: cleanPhone,
                     password: adminPassword,
@@ -130,7 +166,7 @@ const getCompanyBySlug = async (req, res, next) => {
 const updateCompany = async (req, res, next) => {
     try {
         const { slug } = req.params;
-        const { name, companySlug, contactEmail, contactPhone, isActive, enabledModules, licenseStatus, licenseStartDate, licenseEndDate, yearlyFee } = req.body;
+        const { name, companySlug, contactEmail, contactPhone, isActive, enabledModules, licenseStatus, licenseStartDate, licenseEndDate, yearlyFee, orderNoPrefix, counterTicker } = req.body;
 
         const company = await Company.findOne({ companySlug: String(slug).toLowerCase() });
         if (!company) {
@@ -165,8 +201,38 @@ const updateCompany = async (req, res, next) => {
         if (licenseStatus) company.licenseStatus = licenseStatus;
         if (licenseStartDate !== undefined) company.licenseStartDate = licenseStartDate ? new Date(licenseStartDate) : null;
         if (licenseEndDate !== undefined) company.licenseEndDate = licenseEndDate ? new Date(licenseEndDate) : null;
+        if (orderNoPrefix !== undefined) company.orderNoPrefix = String(orderNoPrefix).trim().toUpperCase();
+        if (counterTicker !== undefined) company.counterTicker = Number(counterTicker);
 
         await company.save();
+
+        const updatedPrefix = (company.orderNoPrefix || "CK").trim().toUpperCase();
+        const updatedTicker = company.counterTicker !== undefined ? Number(company.counterTicker) : 1;
+
+        // Sync RestaurantConfig
+        await RestaurantConfig.findOneAndUpdate(
+            { companySlug: company.companySlug },
+            {
+                $set: {
+                    companySlug: company.companySlug,
+                    name: company.name,
+                    orderNoPrefix: updatedPrefix,
+                    counterTicker: updatedTicker,
+                    orderCounter: updatedTicker
+                }
+            },
+            { upsert: true, new: true }
+        );
+
+        // Sync Counter collection
+        if (company.counterTicker !== undefined) {
+            const seqVal = Math.max(0, updatedTicker - 1);
+            await Counter.findOneAndUpdate(
+                { _id: { companySlug: company.companySlug, seqName: "orderNo" } },
+                { $set: { seq: seqVal } },
+                { upsert: true, new: true }
+            );
+        }
 
         // Update slug-wise LicenseConfig document in DB
         await LicenseConfig.findOneAndUpdate(
