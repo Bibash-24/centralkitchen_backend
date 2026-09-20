@@ -9,7 +9,7 @@ const getRestaurantConfig = async (req, res, next) => {
         if (userSlug) {
             company = await Company.findOne({ companySlug: String(userSlug).toLowerCase() });
         }
-        
+
         let config = null;
         if (userSlug) {
             config = await RestaurantConfig.findOne({ slug: String(userSlug).toLowerCase() });
@@ -17,34 +17,23 @@ const getRestaurantConfig = async (req, res, next) => {
         if (!config) {
             config = await RestaurantConfig.findOne();
         }
-        if (!config) {
-            config = new RestaurantConfig({ createdBy: "System" });
-            await config.save();
-        }
-
-        let changed = false;
-        if (!config.enabledModules || config.enabledModules.length === 0) {
-            config.enabledModules = ["home", "orders", "tables", "sales", "expenses", "accounts", "inventory", "customers", "creditors", "vendors", "menuSetup", "tableSetup", "settings", "reports"];
-            changed = true;
-        }
 
         const reportSubmenus = ["sales-revenue", "financial-payments", "stock-inventory", "expenses-costs", "profitability", "crm-loyalty"];
-        if (!config.enabledSubMenus || config.enabledSubMenus.length === 0) {
-            config.enabledSubMenus = [
-                "home-foh", "home-boh", "home-date-filter", "home-popular-dishes", "home-revenue-breakdown", "home-payment-mix", "home-expense-trend", "home-expense-breakdown", "home-order-distribution", "home-creditors-ledger", "home-loyalty-lifecycle",
-                "items", "categories", "combos", "qr", "timings",
-                "areas", "tables", "duplicateTable",
-                "details", "ratios", "users", "superuser", "permissions",
-                ...reportSubmenus
-            ];
-            changed = true;
-        }
+        const defaultModules = ["home", "orders", "tables", "sales", "expenses", "accounts", "inventory", "customers", "creditors", "vendors", "menuSetup", "tableSetup", "settings", "reports"];
+        const defaultSubMenus = [
+            "home-foh", "home-boh", "home-date-filter", "home-popular-dishes", "home-revenue-breakdown", "home-payment-mix", "home-expense-trend", "home-expense-breakdown", "home-order-distribution", "home-creditors-ledger", "home-loyalty-lifecycle",
+            "items", "categories", "combos", "qr", "timings",
+            "areas", "tables", "duplicateTable",
+            "details", "ratios", "users", "superuser", "permissions",
+            ...reportSubmenus
+        ];
 
-        if (changed) {
-            await config.save();
-        }
+        let responseData = config ? config.toObject() : {
+            name: "Central Kitchen",
+            enabledModules: defaultModules,
+            enabledSubMenus: defaultSubMenus
+        };
 
-        const responseData = config.toObject();
         if (company) {
             responseData.name = company.name || responseData.name;
             responseData.address = company.address || responseData.address;
@@ -56,6 +45,8 @@ const getRestaurantConfig = async (req, res, next) => {
             responseData.logo = company.logo || responseData.logo;
             responseData.paymentQrCode = company.paymentQrCode || responseData.paymentQrCode;
             responseData.contactNumbers = company.contactPhone ? [company.contactPhone] : responseData.contactNumbers;
+            responseData.orderNoPrefix = company.orderNoPrefix || responseData.orderNoPrefix;
+            responseData.orderCounter = company.orderCounter || responseData.orderCounter;
         }
 
         res.status(200).json({
@@ -108,7 +99,9 @@ const updateRestaurantConfig = async (req, res, next) => {
             vatPercentage,
             wifiPrinterIp,
             wifiPrinterPort,
-            thermalPaperWidth
+            thermalPaperWidth,
+            orderNoPrefix,
+            orderCounter
         } = req.body;
 
         const actorName = req.user ? (req.user.name || req.user.username) : "System";
@@ -120,6 +113,8 @@ const updateRestaurantConfig = async (req, res, next) => {
         if (!config) {
             config = await RestaurantConfig.findOne();
         }
+
+        // If no RestaurantConfig document exists, instantiate and save only upon explicit update
         if (!config) {
             config = new RestaurantConfig({ createdBy: actorName });
         }
@@ -172,6 +167,9 @@ const updateRestaurantConfig = async (req, res, next) => {
         if (wifiPrinterPort !== undefined) config.wifiPrinterPort = Number(wifiPrinterPort) || 9100;
         if (thermalPaperWidth !== undefined) config.thermalPaperWidth = Number(thermalPaperWidth) || 48;
 
+        if (orderNoPrefix !== undefined) config.orderNoPrefix = orderNoPrefix;
+        if (orderCounter !== undefined) config.orderCounter = orderCounter;
+
         config.updatedBy = actorName;
         config.updatedOn = new Date();
 
@@ -188,6 +186,8 @@ const updateRestaurantConfig = async (req, res, next) => {
             if (isVatApplicable !== undefined) compUpdates.isVatApplicable = isVatApplicable;
             if (logo !== undefined) compUpdates.logo = logo;
             if (paymentQrCode !== undefined) compUpdates.paymentQrCode = paymentQrCode;
+            if (orderNoPrefix !== undefined) compUpdates.orderNoPrefix = orderNoPrefix;
+            if (orderCounter !== undefined) compUpdates.orderCounter = orderCounter;
 
             if (Object.keys(compUpdates).length > 0) {
                 await Company.findOneAndUpdate(

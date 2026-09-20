@@ -1,7 +1,6 @@
 const mongoose = require("mongoose");
 
 const orderItemSchema = new mongoose.Schema({
-  companySlug: { type: String, default: "main-kitchen", required: true, index: true },
   menuItemId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "MenuItem",
@@ -10,6 +9,7 @@ const orderItemSchema = new mongoose.Schema({
   name: { type: String, required: true },
   quantity: { type: Number, required: true, min: 1 },
   price: { type: Number, required: true, min: 0 },
+  portion: { type: String, default: "" },
   notes: { type: String, default: "" }
 }, { _id: false });
 
@@ -22,6 +22,12 @@ const orderTimelineSchema = new mongoose.Schema({
 }, { _id: false });
 
 const orderSchema = new mongoose.Schema({
+  companySlug: {
+    type: String,
+    default: "main-kitchen",
+    required: true,
+    index: true
+  },
   orderNo: {
     type: String,
     required: true,
@@ -54,7 +60,7 @@ const orderSchema = new mongoose.Schema({
   },
   paymentMethod: {
     type: String,
-    enum: ["Cash on Delivery", "Online / Transfer", "Credit / Account", "Prepaid"],
+    required: true,
     default: "Cash on Delivery"
   },
   paymentStatus: {

@@ -160,32 +160,28 @@ const login = async (req, res, next) => {
             }
         }
 
-        const LicenseConfig = require("../../models/superadmin/licenseModel");
-        const license = await LicenseConfig.findOne();
-        if (license) {
-            const todayStr = new Date().toISOString().split("T")[0];
+        // Validate System License for non-Superadmin users only
+        if (user.role !== "Superadmin") {
+            const LicenseConfig = require("../../models/superadmin/licenseModel");
+            let license = await LicenseConfig.findOne();
+            if (license) {
+                const todayStr = new Date().toISOString().split("T")[0];
 
-            // If trial is active but expired, update database status
-            if (license.isTrialActive && todayStr > license.trialEndDate) {
-                license.isTrialActive = false;
-                await license.save();
-            }
+                if (license.isTrialActive && todayStr > license.trialEndDate) {
+                    license.isTrialActive = false;
+                    await license.save();
+                }
 
-            // If system activation is active but expired, update database status
-            if (license.isSystemActivated && todayStr > license.activationEndDate) {
-                license.isSystemActivated = false;
-                await license.save();
-            }
+                if (license.isSystemActivated && todayStr > license.activationEndDate) {
+                    license.isSystemActivated = false;
+                    await license.save();
+                }
 
-            // Block login if neither trial nor system activation is active
-            if (!license.isTrialActive && !license.isSystemActivated) {
-                const error = createHttpError(403, "System License is expired or inactive. Please contact system provider.");
-                return next(error);
+                if (!license.isTrialActive && !license.isSystemActivated) {
+                    const error = createHttpError(403, "System License is expired or inactive. Please contact system provider.");
+                    return next(error);
+                }
             }
-        } else {
-            // If no license configuration is found in the database, treat it as inactive/expired
-            const error = createHttpError(403, "System License is expired or inactive. Please contact system provider.");
-            return next(error);
         }
 
 

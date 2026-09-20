@@ -10,29 +10,44 @@ const createDeliveryOrder = async (req, res, next) => {
         if (!recipientName || !recipientPhone || !deliveryAddress) {
             return res.status(400).json({ success: false, message: "Recipient name, phone, and delivery address are required." });
         }
+        if (!paymentMethod) {
+            return res.status(400).json({ success: false, message: "Payment method is required." });
+        }
         if (!items || !Array.isArray(items) || items.length === 0) {
             return res.status(400).json({ success: false, message: "At least one order item is required." });
         }
 
+        const companySlug = req.user?.companySlug || req.companySlug || "main-kitchen";
+
         // Get next sequence for orderNo
         const counter = await Counter.findByIdAndUpdate(
-            { _id: { companySlug: req.companySlug || "main-kitchen", seqName: "orderNo" } },
+            { _id: { companySlug, seqName: "orderNo" } },
             { $inc: { seq: 1 } },
             { new: true, upsert: true }
         );
 
         const orderNo = `CK-${String(counter.seq).padStart(4, "0")}`;
-        const totalAmount = items.reduce((sum, item) => sum + (Number(item.price) * Number(item.quantity)), 0);
+        
+        const cleanedItems = items.map(item => ({
+            menuItemId: item.menuItemId,
+            name: item.name,
+            quantity: Number(item.quantity) || 1,
+            price: Number(item.price) || 0,
+            portion: item.portion || "",
+            notes: item.notes || ""
+        }));
 
+        const totalAmount = cleanedItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
         const actorName = req.user ? (req.user.name || req.user.username) : "Kitchen Staff";
 
         const newOrder = new Order({
+            companySlug,
             orderNo,
             recipientName,
             recipientPhone,
             deliveryAddress,
             notes: notes || "",
-            items,
+            items: cleanedItems,
             totalAmount,
             paymentMethod: paymentMethod || "Cash on Delivery",
             deliveryStatus: "Created",
@@ -63,21 +78,36 @@ const createDeliveryOrder = async (req, res, next) => {
 const getDeliveryOrders = async (req, res, next) => {
     try {
         const { status, search } = req.query;
-        let query = { isDeleted: false, companySlug: req.companySlug || "main-kitchen" };
+        const companySlug = req.user?.companySlug || req.companySlug || "main-kitchen";
+
+        let filterConditions = [
+            { isDeleted: false },
+            {
+                $or: [
+                    { companySlug: companySlug },
+                    { companySlug: { $exists: false } },
+                    { companySlug: null }
+                ]
+            }
+        ];
 
         if (status && status !== "All") {
-            query.deliveryStatus = status;
+            filterConditions.push({ deliveryStatus: status });
         }
 
-        if (search) {
-            query.$or = [
-                { orderNo: { $regex: search, $options: "i" } },
-                { recipientName: { $regex: search, $options: "i" } },
-                { recipientPhone: { $regex: search, $options: "i" } },
-                { deliveryAddress: { $regex: search, $options: "i" } }
-            ];
+        if (search && search.trim()) {
+            const searchRegex = { $regex: search.trim(), $options: "i" };
+            filterConditions.push({
+                $or: [
+                    { orderNo: searchRegex },
+                    { recipientName: searchRegex },
+                    { recipientPhone: searchRegex },
+                    { deliveryAddress: searchRegex }
+                ]
+            });
         }
 
+        const query = { $and: filterConditions };
         const orders = await Order.find(query).sort({ createdAt: -1 });
 
         res.status(200).json({

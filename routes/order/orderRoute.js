@@ -1,3 +1,4 @@
+const { isVerifiedUser } = require("../../middlewares/tokenVerification");
 const express = require("express");
 const router = express.Router();
 const { createDeliveryOrder, getDeliveryOrders, updateDeliveryStatus, assignRider } = require("../../controllers/order/orderController");
@@ -316,9 +317,9 @@ const { createDeliveryOrder, getDeliveryOrders, updateDeliveryStatus, assignRide
  *         description: Order or Staff member not found
  */
 
-router.post("/", createDeliveryOrder);
-router.get("/", getDeliveryOrders);
-router.patch("/:id/status", updateDeliveryStatus);
-router.patch("/:id/assign-rider", assignRider);
+router.post("/", isVerifiedUser, createDeliveryOrder);
+router.get("/", isVerifiedUser, getDeliveryOrders);
+router.patch("/:id/status", isVerifiedUser, updateDeliveryStatus);
+router.patch("/:id/assign-rider", isVerifiedUser, assignRider);
 
 module.exports = router;
