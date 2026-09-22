@@ -1,19 +1,31 @@
 const RestaurantConfig = require("../../models/restaurant/restaurantModel");
 const Company = require("../../models/company/companyModel");
-const createHttpError = require("http-errors");
 
 const getRestaurantConfig = async (req, res, next) => {
     try {
-        const userSlug = req.user?.companySlug || req.headers["x-company-slug"];
+        const userSlug = req.query.companySlug || req.headers["x-company-slug"] || req.user?.companySlug;
+        const cleanSlug = userSlug ? String(userSlug).toLowerCase().trim() : "";
+
         let company = null;
-        if (userSlug) {
-            company = await Company.findOne({ companySlug: String(userSlug).toLowerCase() });
+        if (cleanSlug) {
+            company = await Company.findOne({ companySlug: cleanSlug, isDeleted: { $ne: true } });
         }
 
         let config = null;
-        if (userSlug) {
-            config = await RestaurantConfig.findOne({ slug: String(userSlug).toLowerCase() });
+        if (cleanSlug) {
+            config = await RestaurantConfig.findOne({ companySlug: cleanSlug });
         }
+        
+        // Auto-create RestaurantConfig document for cleanSlug if not present
+        if (!config && cleanSlug) {
+            config = new RestaurantConfig({
+                companySlug: cleanSlug,
+                name: company?.name || "Company Profile",
+                contactNumbers: company?.contactPhone ? [company.contactPhone] : []
+            });
+            await config.save();
+        }
+
         if (!config) {
             config = await RestaurantConfig.findOne();
         }
@@ -23,31 +35,17 @@ const getRestaurantConfig = async (req, res, next) => {
         const defaultSubMenus = [
             "home-foh", "home-boh", "home-date-filter", "home-popular-dishes", "home-revenue-breakdown", "home-payment-mix", "home-expense-trend", "home-expense-breakdown", "home-order-distribution", "home-creditors-ledger", "home-loyalty-lifecycle",
             "items", "categories", "combos", "qr", "timings",
-            
             "details", "ratios", "users", "superuser", "permissions",
             ...reportSubmenus
         ];
 
         let responseData = config ? config.toObject() : {
-            name: "Central Kitchen",
-            enabledModules: defaultModules,
-            enabledSubMenus: defaultSubMenus
+            name: "Central Kitchen"
         };
 
-        if (company) {
-            responseData.name = company.name || responseData.name;
-            responseData.address = company.address || responseData.address;
-            responseData.panNumber = company.panNumber || responseData.panNumber;
-            responseData.defaultCurrency = company.defaultCurrency || responseData.defaultCurrency;
-            responseData.openingTime = company.openingTime || responseData.openingTime;
-            responseData.closingTime = company.closingTime || responseData.closingTime;
-            responseData.isVatApplicable = company.isVatApplicable !== undefined ? company.isVatApplicable : responseData.isVatApplicable;
-            responseData.logo = company.logo || responseData.logo;
-            responseData.paymentQrCode = company.paymentQrCode || responseData.paymentQrCode;
-            responseData.contactNumbers = company.contactPhone ? [company.contactPhone] : responseData.contactNumbers;
-            responseData.orderNoPrefix = company.orderNoPrefix || responseData.orderNoPrefix;
-            responseData.orderCounter = company.orderCounter || responseData.orderCounter;
-        }
+        // Source enabledModules and enabledSubMenus exclusively from Company DB
+        responseData.enabledModules = company?.enabledModules !== undefined ? company.enabledModules : defaultModules;
+        responseData.enabledSubMenus = company?.enabledSubMenus !== undefined ? company.enabledSubMenus : defaultSubMenus;
 
         res.status(200).json({
             success: true,
@@ -61,18 +59,22 @@ const getRestaurantConfig = async (req, res, next) => {
 
 const updateRestaurantConfig = async (req, res, next) => {
     try {
-        const userSlug = req.user?.companySlug || req.headers["x-company-slug"];
+        const targetSlug = String(req.query.companySlug || req.body.companySlug || req.headers["x-company-slug"] || req.user?.companySlug || "").toLowerCase().trim();
+        
+        if (!targetSlug) {
+            return res.status(400).json({ success: false, message: "Company identifier (companySlug) is required." });
+        }
+
         const {
             name,
             contactNumbers,
             address,
             panNumber,
             defaultCurrency,
-            enabledModules,
-            enabledSubMenus,
             logo,
             paymentQrCode,
             slogan,
+            hasOperatingHours,
             openingTime,
             closingTime,
             primaryColor,
@@ -106,33 +108,22 @@ const updateRestaurantConfig = async (req, res, next) => {
 
         const actorName = req.user ? (req.user.name || req.user.username) : "System";
 
-        let config = null;
-        if (userSlug) {
-            config = await RestaurantConfig.findOne({ slug: String(userSlug).toLowerCase() });
-        }
+        // Find or create RestaurantConfig document strictly scoped to targetSlug
+        let config = await RestaurantConfig.findOne({ companySlug: targetSlug });
         if (!config) {
-            config = await RestaurantConfig.findOne();
+            config = new RestaurantConfig({ companySlug: targetSlug, createdBy: actorName });
         }
 
-        // If no RestaurantConfig document exists, instantiate and save only upon explicit update
-        if (!config) {
-            config = new RestaurantConfig({ createdBy: actorName });
-        }
-
-        if (name) config.name = name;
+        config.companySlug = targetSlug;
+        if (name !== undefined) config.name = name;
         if (contactNumbers && Array.isArray(contactNumbers)) config.contactNumbers = contactNumbers;
         if (address !== undefined) config.address = address;
         if (panNumber !== undefined) config.panNumber = panNumber;
         if (defaultCurrency !== undefined) config.defaultCurrency = defaultCurrency;
-        if (enabledModules !== undefined && Array.isArray(enabledModules)) {
-            config.enabledModules = enabledModules;
-        }
-        if (enabledSubMenus !== undefined && Array.isArray(enabledSubMenus)) {
-            config.enabledSubMenus = enabledSubMenus;
-        }
         if (logo !== undefined) config.logo = logo;
         if (paymentQrCode !== undefined) config.paymentQrCode = paymentQrCode;
         if (slogan !== undefined) config.slogan = slogan;
+        if (hasOperatingHours !== undefined) config.hasOperatingHours = Boolean(hasOperatingHours);
         if (openingTime !== undefined) config.openingTime = openingTime;
         if (closingTime !== undefined) config.closingTime = closingTime;
         if (primaryColor !== undefined) config.primaryColor = primaryColor;
@@ -175,31 +166,9 @@ const updateRestaurantConfig = async (req, res, next) => {
 
         await config.save();
 
-        // Also sync fields directly into Company model record if userSlug is available
-        if (userSlug) {
-            const compUpdates = {};
-            if (address !== undefined) compUpdates.address = address;
-            if (panNumber !== undefined) compUpdates.panNumber = panNumber;
-            if (defaultCurrency !== undefined) compUpdates.defaultCurrency = defaultCurrency;
-            if (openingTime !== undefined) compUpdates.openingTime = openingTime;
-            if (closingTime !== undefined) compUpdates.closingTime = closingTime;
-            if (isVatApplicable !== undefined) compUpdates.isVatApplicable = isVatApplicable;
-            if (logo !== undefined) compUpdates.logo = logo;
-            if (paymentQrCode !== undefined) compUpdates.paymentQrCode = paymentQrCode;
-            if (orderNoPrefix !== undefined) compUpdates.orderNoPrefix = orderNoPrefix;
-            if (orderCounter !== undefined) compUpdates.orderCounter = orderCounter;
-
-            if (Object.keys(compUpdates).length > 0) {
-                await Company.findOneAndUpdate(
-                    { companySlug: String(userSlug).toLowerCase() },
-                    compUpdates
-                );
-            }
-        }
-
         res.status(200).json({
             success: true,
-            message: "Company details updated successfully!",
+            message: "Restaurant configuration updated successfully for " + targetSlug,
             data: config
         });
     } catch (error) {

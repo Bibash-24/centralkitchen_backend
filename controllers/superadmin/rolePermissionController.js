@@ -19,24 +19,39 @@ const getRolePermissions = async (req, res, next) => {
 
         if (!permissions || permissions.length === 0) {
             let companyEnabledModules = null;
+            let companyEnabledSubMenus = null;
             if (targetSlug !== "global") {
                 const Company = require("../../models/company/companyModel");
                 const compDoc = await Company.findOne({ companySlug: targetSlug, isDeleted: { $ne: true } });
-                if (compDoc && Array.isArray(compDoc.enabledModules) && compDoc.enabledModules.length > 0) {
-                    companyEnabledModules = compDoc.enabledModules;
+                if (compDoc) {
+                    companyEnabledModules = Array.isArray(compDoc.enabledModules) ? compDoc.enabledModules : [];
+                    companyEnabledSubMenus = Array.isArray(compDoc.enabledSubMenus) ? compDoc.enabledSubMenus : [];
                 }
             }
 
             const defaults = defaultRolesList.map(item => {
                 let allowedMenus = item.allowedMenus;
-                if (companyEnabledModules && companyEnabledModules.length > 0) {
-                    allowedMenus = allowedMenus.filter(m => m === "settings" || m === "support" || companyEnabledModules.includes(m));
+                let allowedSubMenus = item.allowedSubMenus;
+
+                if (targetSlug !== "global") {
+                    allowedMenus = (companyEnabledModules || []).filter(m => m === "settings" || m === "support" || (companyEnabledModules && companyEnabledModules.includes(m)));
+                    if (!allowedMenus.includes("settings")) allowedMenus.push("settings");
+                    allowedSubMenus = (companyEnabledSubMenus || []).filter(s => s === "details" || (companyEnabledSubMenus && companyEnabledSubMenus.includes(s)));
+                    if (!allowedSubMenus.includes("details")) allowedSubMenus.push("details");
                 }
+
                 return {
                     companySlug: targetSlug,
                     role: item.role,
                     allowedMenus,
-                    allowedSubMenus: item.allowedSubMenus,
+                    allowedSubMenus,
+                    actions: {
+                        canView: true,
+                        canCreate: true,
+                        canEdit: true,
+                        canDelete: true,
+                        canExport: true
+                    },
                     createdBy: "System",
                     createdOn: new Date(),
                     updatedBy: "System",
@@ -121,8 +136,17 @@ const updateRolePermissions = async (req, res, next) => {
                 }
                 perm.allowedMenus = allowedMenus;
                 perm.allowedSubMenus = allowedSubMenus;
+                const inputActions = config.actions || {};
+                perm.actions = {
+                    canView: inputActions.canView !== undefined ? Boolean(inputActions.canView) : (config.canView !== undefined ? Boolean(config.canView) : true),
+                    canCreate: inputActions.canCreate !== undefined ? Boolean(inputActions.canCreate) : (config.canCreate !== undefined ? Boolean(config.canCreate) : true),
+                    canEdit: inputActions.canEdit !== undefined ? Boolean(inputActions.canEdit) : (config.canEdit !== undefined ? Boolean(config.canEdit) : true),
+                    canDelete: inputActions.canDelete !== undefined ? Boolean(inputActions.canDelete) : (config.canDelete !== undefined ? Boolean(config.canDelete) : true),
+                    canExport: inputActions.canExport !== undefined ? Boolean(inputActions.canExport) : (config.canExport !== undefined ? Boolean(config.canExport) : true)
+                };
                 perm.markModified("allowedMenus");
                 perm.markModified("allowedSubMenus");
+                perm.markModified("actions");
                 perm.updatedBy = updaterName;
                 perm.updatedOn = new Date();
                 await perm.save();

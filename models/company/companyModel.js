@@ -28,37 +28,6 @@ const companySchema = new mongoose.Schema({
     type: String,
     trim: true
   },
-  address: {
-    type: String,
-    trim: true
-  },
-  panNumber: {
-    type: String,
-    trim: true
-  },
-  defaultCurrency: {
-    type: String,
-    default: "रु",
-    trim: true
-  },
-  openingTime: {
-    type: String
-  },
-  closingTime: {
-    type: String
-  },
-  isVatApplicable: {
-    type: Boolean
-  },
-  vatPercentage: {
-    type: Number
-  },
-  logo: {
-    type: String
-  },
-  paymentQrCode: {
-    type: String
-  },
   yearlyFee: {
     type: Number
   },
@@ -75,12 +44,6 @@ const companySchema = new mongoose.Schema({
   },
   deletedAt: {
     type: Date
-  },
-  enabledModules: {
-    type: [String]
-  },
-  enabledSubMenus: {
-    type: [String]
   },
   licenseStatus: {
     type: String,

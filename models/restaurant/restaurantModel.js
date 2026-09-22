@@ -48,26 +48,7 @@ const restaurantConfigSchema = new mongoose.Schema({
         type: Number,
         default: "" // 48 for 80mm, 32 for 58mm
     },
-    enabledModules: {
-        type: [String],
-        default: ["home", "deliveries", "sales", "expenses", "accounts", "inventory", "creditors", "vendors", "staff", "menuSetup", "settings", "reports", "support"]
-    },
-    enabledSubMenus: {
-        type: [String],
-        default: [
-            "home-boh", "home-date-filter", "home-popular-dishes", "home-revenue-breakdown", 
-            "home-payment-mix", "home-expense-trend", "home-expense-breakdown", "home-creditors-ledger",
-            "items", "categories",
-            "details", "ratios", "users", "superuser", "permissions",
-            "list", "credit-setup",
-            "inventory-list", "inventory-setup",
-            "vendors-directory", "cheque-setup",
-            "staff-list", "staff-attendance", "staff-payroll",
-            "sales-revenue", "financial-payments", "stock-inventory", "expenses-costs", "profitability",
-            "support-guide", "issues"
-        ]
-    },
-                creditEnabled: { type: Boolean },
+    creditEnabled: { type: Boolean },
     creditMaxLimit: { type: Number },
     creditGracePeriod: { type: Number },
     creditAlertThreshold: { type: Number },
@@ -92,17 +73,17 @@ const restaurantConfigSchema = new mongoose.Schema({
         type: String, // Base64 formatted payment QR code image string
         default: ""
     },
-        openingTime: {
+        hasOperatingHours: {
+        type: Boolean,
+        default: false
+    },
+    openingTime: {
         type: String,
         default: "08:00 AM"
     },
     closingTime: {
         type: String,
         default: "09:00 PM"
-    },
-    yearlyFee: {
-        type: Number,
-        default: 25000
     },
     createdBy: {
         type: String,

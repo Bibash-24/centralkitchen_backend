@@ -29,7 +29,12 @@ const enrichStaffWithRole = async (staff) => {
 
 const getStaffList = async (req, res, next) => {
     try {
-        const staffDocs = await Staff.find({ isDeleted: { $ne: true } }).sort({ createdAt: -1 });
+        const querySlug = req.query.companySlug || req.headers["x-company-slug"] || (req.user && req.user.role !== "Superadmin" ? req.user.companySlug : null);
+        const filter = { isDeleted: { $ne: true } };
+        if (querySlug) {
+            filter.companySlug = querySlug;
+        }
+        const staffDocs = await Staff.find(filter).sort({ createdAt: -1 });
         
         const data = [];
         for (const doc of staffDocs) {
@@ -49,8 +54,14 @@ const getStaffList = async (req, res, next) => {
 
 const createStaff = async (req, res, next) => {
     try {
-        const { name, email, phone, panNumber, citizenshipNumber, salary, isCurrentlyEmployed } = req.body;
+        const { name, email, phone, panNumber, citizenshipNumber, salary, isCurrentlyEmployed, companySlug: bodySlug } = req.body;
+        const targetSlug = bodySlug || req.query.companySlug || req.headers["x-company-slug"] || (req.user ? req.user.companySlug : null);
         
+        if (!targetSlug) {
+            const error = createError(400, "Company identifier (companySlug) is required!");
+            return next(error);
+        }
+
         // Required validation: name and phone
         if (!name || !phone) {
             const error = createError(400, "Name and Contact Number are required!");
@@ -70,8 +81,9 @@ const createStaff = async (req, res, next) => {
             return next(error);
         }
 
-        // Unique phone constraint check
+        // Unique phone constraint check per company
         const existingByPhone = await Staff.findOne({
+            companySlug: targetSlug,
             isDeleted: { $ne: true },
             phone: cleanPhoneStr
         });
@@ -80,9 +92,10 @@ const createStaff = async (req, res, next) => {
             return next(error);
         }
 
-        // Unique email constraint check (if email is provided)
+        // Unique email constraint check per company (if email is provided)
         if (email) {
             const existingByEmail = await Staff.findOne({
+                companySlug: targetSlug,
                 isDeleted: { $ne: true },
                 email: email.trim().toLowerCase()
             });
@@ -94,6 +107,7 @@ const createStaff = async (req, res, next) => {
 
         const actorName = req.user ? (req.user.email || String(req.user.phone || req.user.role)) : "System";
         const staff = new Staff({
+            companySlug: targetSlug,
             name,
             email: email ? email.trim().toLowerCase() : "",
             phone: cleanPhoneStr,
@@ -120,7 +134,8 @@ const createStaff = async (req, res, next) => {
 const updateStaff = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const { name, email, phone, panNumber, citizenshipNumber, salary, isCurrentlyEmployed } = req.body;
+        const { name, email, phone, panNumber, citizenshipNumber, salary, isCurrentlyEmployed, companySlug: bodySlug } = req.body;
+        const targetSlug = bodySlug || req.query.companySlug || req.headers["x-company-slug"] || (req.user ? req.user.companySlug : null);
 
         // Required validation
         if (!name || !phone) {
@@ -139,29 +154,28 @@ const updateStaff = async (req, res, next) => {
             return next(error);
         }
 
-        const staff = await Staff.findOne({ _id: id, isDeleted: { $ne: true } });
+        const filter = { _id: id, isDeleted: { $ne: true } };
+        if (targetSlug) filter.companySlug = targetSlug;
+
+        const staff = await Staff.findOne(filter);
         if (!staff) {
             const error = createError(404, "Staff member not found!");
             return next(error);
         }
 
         // Check constraints matching other staff members
-        const otherByPhone = await Staff.findOne({
-            _id: { $ne: id },
-            isDeleted: { $ne: true },
-            phone: cleanPhoneStr
-        });
+        const phoneFilter = { _id: { $ne: id }, isDeleted: { $ne: true }, phone: cleanPhoneStr };
+        if (targetSlug) phoneFilter.companySlug = targetSlug;
+        const otherByPhone = await Staff.findOne(phoneFilter);
         if (otherByPhone) {
             const error = createError(400, "Another staff member with this contact number already exists!");
             return next(error);
         }
 
         if (email) {
-            const otherByEmail = await Staff.findOne({
-                _id: { $ne: id },
-                isDeleted: { $ne: true },
-                email: email.trim().toLowerCase()
-            });
+            const emailFilter = { _id: { $ne: id }, isDeleted: { $ne: true }, email: email.trim().toLowerCase() };
+            if (targetSlug) emailFilter.companySlug = targetSlug;
+            const otherByEmail = await Staff.findOne(emailFilter);
             if (otherByEmail) {
                 const error = createError(400, "Another staff member with this email address already exists!");
                 return next(error);
@@ -196,7 +210,11 @@ const updateStaff = async (req, res, next) => {
 const deleteStaff = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const staff = await Staff.findOne({ _id: id, isDeleted: { $ne: true } });
+        const querySlug = req.query.companySlug || req.headers["x-company-slug"] || (req.user ? req.user.companySlug : null);
+        const filter = { _id: id, isDeleted: { $ne: true } };
+        if (querySlug) filter.companySlug = querySlug;
+
+        const staff = await Staff.findOne(filter);
         if (!staff) {
             const error = createError(404, "Staff member not found!");
             return next(error);

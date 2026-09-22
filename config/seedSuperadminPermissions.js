@@ -1,15 +1,12 @@
 const RolePermission = require("../models/superadmin/rolePermissionModel");
-const RestaurantConfig = require("../models/restaurant/restaurantModel");
-const Company = require("../models/company/companyModel");
 
 const allModules = [
-    "home", "deliveries", "sales", "expenses", "accounts", 
-    "inventory", "creditors", "vendors", "staff", "menuSetup", 
+    "home", "deliveries", "sales", "expenses", "accounts",
+    "inventory", "creditors", "vendors", "staff", "menuSetup",
     "settings", "reports", "support"
 ];
-
 const allSubMenus = [
-    "home-boh", "home-date-filter", "home-popular-dishes", "home-revenue-breakdown", 
+    "home-boh", "home-date-filter", "home-popular-dishes", "home-revenue-breakdown",
     "home-payment-mix", "home-expense-trend", "home-expense-breakdown", "home-creditors-ledger",
     "items", "categories",
     "details", "ratios", "users", "superuser", "permissions",
@@ -23,7 +20,7 @@ const allSubMenus = [
 
 const seedSuperadminPermissions = async () => {
     try {
-        // 1. Seed EXCLUSIVELY Superadmin in rolepermissions collection
+        // Seed Superadmin role in rolepermissions collection for global scope
         await RolePermission.findOneAndUpdate(
             { companySlug: "global", role: "Superadmin" },
             {
@@ -36,40 +33,12 @@ const seedSuperadminPermissions = async () => {
                     isDeleted: false
                 }
             },
-            { upsert: true, returnDocument: 'after' }
+            { upsert: true, returnDocument: "after" }
         );
 
-        // 2. Remove any non-Superadmin entries from rolepermissions collection
-        await RolePermission.deleteMany({
-            role: { $nin: ["Superadmin", "superadmin", "SuperAdmin"] }
-        });
-
-        // 3. Enable all system modules & submenus in global RestaurantConfig
-        await RestaurantConfig.updateMany(
-            {},
-            {
-                $set: {
-                    enabledModules: allModules,
-                    enabledSubMenus: allSubMenus,
-                    updatedBy: "System Seed"
-                }
-            }
-        );
-
-        // 4. Enable all system modules & submenus in incorporated Companies
-        await Company.updateMany(
-            {},
-            {
-                $set: {
-                    enabledModules: allModules,
-                    enabledSubMenus: allSubMenus
-                }
-            }
-        );
-
-        console.log("Superadmin permissions seeded strictly in rolepermissions. Non-Superadmin roles cleared from rolepermissions table.");
+        console.log("Superadmin global permissions seeded successfully.");
     } catch (error) {
-        console.error("Error seeding Superadmin role permissions:", error.message);
+        console.error("Error seeding Superadmin role permissions: ", error.message);
     }
 };
 

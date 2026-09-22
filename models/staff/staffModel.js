@@ -1,7 +1,7 @@
 const mongoose = require("mongoose");
 
 const staffSchema = new mongoose.Schema({
-  companySlug: { type: String, default: "main-kitchen", required: true, index: true },
+  companySlug: { type: String, required: true, index: true },
     name: {
         type: String,
         required: true
