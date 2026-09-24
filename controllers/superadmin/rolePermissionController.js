@@ -79,7 +79,16 @@ const getRolePermissions = async (req, res, next) => {
 
 const updateRolePermissions = async (req, res, next) => {
     try {
-        const updates = req.body || {};
+        let updates = req.body || {};
+        if (updates.role && (Array.isArray(updates.allowedMenus) || Array.isArray(updates.allowedSubMenus))) {
+            updates = {
+                [updates.role]: {
+                    allowedMenus: updates.allowedMenus,
+                    allowedSubMenus: updates.allowedSubMenus,
+                    actions: updates.actions
+                }
+            };
+        }
         const querySlug = req.query.companySlug;
         const userSlug = req.user ? req.user.companySlug : null;
         const targetSlug = querySlug || (req.user && req.user.role !== "Superadmin" ? userSlug : "global") || "global";
