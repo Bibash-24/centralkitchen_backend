@@ -85,7 +85,7 @@ const updateRolePermissions = async (req, res, next) => {
                 [updates.role]: {
                     allowedMenus: updates.allowedMenus,
                     allowedSubMenus: updates.allowedSubMenus,
-                    actions: updates.actions
+                    submenuActions: updates.submenuActions
                 }
             };
         }
@@ -131,34 +131,30 @@ const updateRolePermissions = async (req, res, next) => {
                 }
 
                 const escapedRole = role.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-                let perm = await RolePermission.findOne({ 
-                    companySlug: targetSlug,
-                    role: { $regex: new RegExp("^" + escapedRole + "$", "i") }, 
-                    isDeleted: { $ne: true } 
-                });
-                if (!perm) {
-                    perm = new RolePermission({ companySlug: targetSlug, role, createdBy: updaterName, createdOn: new Date() });
-                } else if (perm.isDeleted) {
-                    perm.isDeleted = false;
-                    perm.deletedBy = undefined;
-                    perm.deletedOn = undefined;
-                }
-                perm.allowedMenus = allowedMenus;
-                perm.allowedSubMenus = allowedSubMenus;
-                const inputActions = config.actions || {};
-                perm.actions = {
-                    canView: inputActions.canView !== undefined ? Boolean(inputActions.canView) : (config.canView !== undefined ? Boolean(config.canView) : true),
-                    canCreate: inputActions.canCreate !== undefined ? Boolean(inputActions.canCreate) : (config.canCreate !== undefined ? Boolean(config.canCreate) : true),
-                    canEdit: inputActions.canEdit !== undefined ? Boolean(inputActions.canEdit) : (config.canEdit !== undefined ? Boolean(config.canEdit) : true),
-                    canDelete: inputActions.canDelete !== undefined ? Boolean(inputActions.canDelete) : (config.canDelete !== undefined ? Boolean(config.canDelete) : true),
-                    canExport: inputActions.canExport !== undefined ? Boolean(inputActions.canExport) : (config.canExport !== undefined ? Boolean(config.canExport) : true)
-                };
-                perm.markModified("allowedMenus");
-                perm.markModified("allowedSubMenus");
-                perm.markModified("actions");
-                perm.updatedBy = updaterName;
-                perm.updatedOn = new Date();
-                await perm.save();
+                await RolePermission.findOneAndUpdate(
+                    {
+                        companySlug: targetSlug,
+                        role: { $regex: new RegExp("^" + escapedRole + "$", "i") },
+                        isDeleted: { $ne: true }
+                    },
+                    {
+                        $set: {
+                            companySlug: targetSlug,
+                            role,
+                            allowedMenus,
+                            allowedSubMenus,
+                            submenuActions: config.submenuActions || {},
+                            updatedBy: updaterName,
+                            updatedOn: new Date(),
+                            isDeleted: false
+                        },
+                        $setOnInsert: {
+                            createdBy: updaterName,
+                            createdOn: new Date()
+                        }
+                    },
+                    { upsert: true, returnDocument: "after" }
+                );
             }
         }
 

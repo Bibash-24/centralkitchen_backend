@@ -19,12 +19,9 @@ const rolePermissionSchema = new mongoose.Schema({
         type: [String],
         default: []
     },
-    actions: {
-        canView: { type: Boolean, default: true },
-        canCreate: { type: Boolean, default: true },
-        canEdit: { type: Boolean, default: true },
-        canDelete: { type: Boolean, default: true },
-        canExport: { type: Boolean, default: true }
+    submenuActions: {
+        type: mongoose.Schema.Types.Mixed,
+        default: {}
     },
     createdBy: {
         type: String,
