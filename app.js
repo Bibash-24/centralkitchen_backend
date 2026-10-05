@@ -1149,6 +1149,8 @@ app.use("/api/menu-item", require("./routes/menuItem/menuItemRoute"));
 app.use("/api/notification", require("./routes/notification/notificationRoute"));
 app.use("/api/vendor", require("./routes/vendor/vendorRoute"));
 app.use("/api/creditor", require("./routes/creditor/creditorRoute"));
+app.use("/api/customer", require("./routes/customer/customerRoute"));
+app.use("/api/customers", require("./routes/customer/customerRoute"));
 app.use("/api/inventory", require("./routes/inventory/inventoryRoute"));
 app.use("/api/expense", require("./routes/expense/expenseRoute"));
 app.use("/api/dropdown-options", require("./routes/dropdownOption/dropdownOptionRoute"));

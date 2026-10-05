@@ -7,7 +7,15 @@ const createError = require("http-errors");
 
 const getCreditors = async (req, res, next) => {
     try {
-        const creditors = await Creditor.find({ isDeleted: { $ne: true } }).sort({ createdAt: -1 });
+        const targetSlug = req.query.companySlug || req.headers["x-company-slug"] || req.user?.companySlug;
+        const filter = {
+            isDeleted: { $ne: true },
+            $or: [{ type: "creditor" }, { type: { $exists: false } }, { type: null }]
+        };
+        if (targetSlug && targetSlug !== "all") {
+            filter.companySlug = targetSlug;
+        }
+        const creditors = await Creditor.find(filter).sort({ createdAt: -1 });
         
         res.status(200).json({
             success: true,
@@ -21,6 +29,7 @@ const getCreditors = async (req, res, next) => {
 
 const createCreditor = async (req, res, next) => {
     try {
+        const targetSlug = req.body.companySlug || req.headers["x-company-slug"] || req.user?.companySlug || "main-kitchen";
         const { name, phone, address, email, creditLimit, existingCreditAmount, currentBalance, openingBalance } = req.body;
         if (!name || !phone || !address) {
             const error = createError(400, "Full Name, Phone Number, and Address are required!");
@@ -39,10 +48,14 @@ const createCreditor = async (req, res, next) => {
             return next(error);
         }
 
+        const trimmedName = name.trim();
+        const trimmedPhone = phone.trim();
+
         // Check duplicate full name (case-insensitive)
         const existingByName = await Creditor.findOne({
+            companySlug: targetSlug,
             isDeleted: { $ne: true },
-            name: { $regex: new RegExp(`^${name.trim()}$`, "i") }
+            name: { $regex: new RegExp("^" + trimmedName.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&") + "$", "i") }
         });
         if (existingByName) {
             const error = createError(400, "Creditor with this full name already exists!");
@@ -51,8 +64,9 @@ const createCreditor = async (req, res, next) => {
 
         // Check duplicate phone
         const existingByPhone = await Creditor.findOne({
+            companySlug: targetSlug,
             isDeleted: { $ne: true },
-            phone
+            phone: trimmedPhone
         });
         if (existingByPhone) {
             const error = createError(400, "Creditor with this phone number already exists!");
@@ -60,10 +74,12 @@ const createCreditor = async (req, res, next) => {
         }
 
         // Check duplicate email
-        if (email) {
+        if (email && email.trim()) {
+            const trimmedEmail = email.trim();
             const existingByEmail = await Creditor.findOne({
+                companySlug: targetSlug,
                 isDeleted: { $ne: true },
-                email
+                email: { $regex: new RegExp("^" + trimmedEmail.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&") + "$", "i") }
             });
             if (existingByEmail) {
                 const error = createError(400, "Creditor with this email address already exists!");
@@ -71,37 +87,50 @@ const createCreditor = async (req, res, next) => {
             }
         }
 
-        const actorName = req.user ? (req.user.email || String(req.user.phone || req.user.role)) : "System";
-        const initialBalanceRaw = existingCreditAmount !== undefined ? existingCreditAmount : 
-                                 currentBalance !== undefined ? currentBalance : 
-                                 openingBalance !== undefined ? openingBalance : 0;
-        const initialBalance = Number(initialBalanceRaw);
-        const validInitialBalance = !isNaN(initialBalance) && initialBalance > 0 ? initialBalance : 0;
+        const config = await RestaurantConfig.findOne({ companySlug: targetSlug }) || await RestaurantConfig.findOne({});
+        const defaultMaxLimit = config ? config.creditMaxLimit || 50000 : 50000;
+        const limitVal = creditLimit ? Number(creditLimit) : defaultMaxLimit;
+        
+        let initialBalance = 0;
+        if (existingCreditAmount !== undefined && existingCreditAmount !== "") {
+            initialBalance = Math.max(0, Number(existingCreditAmount) || 0);
+        } else if (currentBalance !== undefined && currentBalance !== "") {
+            initialBalance = Math.max(0, Number(currentBalance) || 0);
+        } else if (openingBalance !== undefined && openingBalance !== "") {
+            initialBalance = Math.max(0, Number(openingBalance) || 0);
+        }
 
-        const creditor = new Creditor({
-            name,
-            phone,
-            address,
-            email: email || "",
-            creditLimit: creditLimit !== undefined && creditLimit !== "" ? Number(creditLimit) : 5000,
-            currentBalance: validInitialBalance,
+        const actorName = req.user ? (req.user.name || req.user.email || String(req.user.phone || req.user.role)) : "System";
+
+        const newCreditor = new Creditor({
+            companySlug: targetSlug,
+            type: "creditor",
+            name: trimmedName,
+            phone: trimmedPhone,
+            address: address.trim(),
+            email: email ? email.trim() : "",
+            creditLimit: limitVal,
+            currentBalance: initialBalance,
             createdBy: actorName,
-            creditHistory: validInitialBalance > 0 ? [
-                {
-                    type: "credit",
-                    amount: validInitialBalance,
-                    note: "Opening Balance / Existing Credit Amount",
-                    timestamp: new Date()
-                }
-            ] : []
+            isBlacklisted: Boolean(req.body.isBlacklisted),
+            blacklistReason: req.body.isBlacklisted ? (req.body.blacklistReason || "Manual blacklist") : ""
         });
 
-        await creditor.save();
+        if (initialBalance > 0) {
+            newCreditor.creditHistory.push({
+                type: "credit",
+                amount: initialBalance,
+                note: "Opening Outstanding Balance",
+                timestamp: new Date()
+            });
+        }
+
+        await newCreditor.save();
 
         res.status(201).json({
             success: true,
             message: "Creditor registered successfully",
-            data: creditor
+            data: newCreditor
         });
     } catch (error) {
         next(error);
@@ -111,24 +140,7 @@ const createCreditor = async (req, res, next) => {
 const updateCreditor = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const { name, phone, address, email, creditLimit, isBlacklisted, blacklistReason, existingCreditAmount, currentBalance } = req.body;
-
-        if (!name || !phone || !address) {
-            const error = createError(400, "Full Name, Phone Number, and Address are required!");
-            return next(error);
-        }
-
-        // Phone format validation (Nepal 10 digits starting with 98 or 97)
-        if (!/^(98|97)\d{8}$/.test(phone)) {
-            const error = createError(400, "Please provide a valid 10-digit contact number starting with 98 or 97!");
-            return next(error);
-        }
-
-        // Email format validation (optional)
-        if (email && !/\S+@\S+\.\S+/.test(email)) {
-            const error = createError(400, "Please provide a valid email address!");
-            return next(error);
-        }
+        const { name, phone, address, email, creditLimit, existingCreditAmount, currentBalance, isBlacklisted, blacklistReason } = req.body;
 
         const creditor = await Creditor.findOne({ _id: id, isDeleted: { $ne: true } });
         if (!creditor) {
@@ -136,51 +148,15 @@ const updateCreditor = async (req, res, next) => {
             return next(error);
         }
 
-        // Check unique full name constraints excluding current creditor
-        const otherByName = await Creditor.findOne({
-            _id: { $ne: id },
-            isDeleted: { $ne: true },
-            name: { $regex: new RegExp(`^${name.trim()}$`, "i") }
-        });
-        if (otherByName) {
-            const error = createError(400, "Creditor with this full name already exists!");
-            return next(error);
-        }
+        const actorName = req.user ? (req.user.name || req.user.email || String(req.user.phone || req.user.role)) : "System";
 
-        // Check unique contact number constraints excluding current creditor
-        const otherByPhone = await Creditor.findOne({
-            _id: { $ne: id },
-            isDeleted: { $ne: true },
-            phone
-        });
-        if (otherByPhone) {
-            const error = createError(400, "Creditor with this phone number already exists!");
-            return next(error);
-        }
+        if (name) creditor.name = name.trim();
+        if (phone) creditor.phone = phone.trim();
+        if (address) creditor.address = address.trim();
+        if (email !== undefined) creditor.email = email.trim();
+        if (creditLimit !== undefined) creditor.creditLimit = Number(creditLimit);
 
-        if (email) {
-            const otherByEmail = await Creditor.findOne({
-                _id: { $ne: id },
-                isDeleted: { $ne: true },
-                email
-            });
-            if (otherByEmail) {
-                const error = createError(400, "Creditor with this email address already exists!");
-                return next(error);
-            }
-        }
-
-        const actorName = req.user ? (req.user.email || String(req.user.phone || req.user.role)) : "System";
-        creditor.name = name;
-        creditor.phone = phone;
-        creditor.address = address;
-        creditor.email = email || "";
-        if (creditLimit !== undefined && creditLimit !== "") {
-            creditor.creditLimit = Number(creditLimit);
-        }
-
-        // Update balance / existing credit amount if provided
-        const targetBalanceRaw = existingCreditAmount !== undefined ? existingCreditAmount : currentBalance;
+        const targetBalanceRaw = currentBalance !== undefined ? currentBalance : existingCreditAmount;
         if (targetBalanceRaw !== undefined && targetBalanceRaw !== "") {
             const targetBalance = Number(targetBalanceRaw);
             if (!isNaN(targetBalance) && targetBalance >= 0 && targetBalance !== creditor.currentBalance) {
@@ -196,7 +172,7 @@ const updateCreditor = async (req, res, next) => {
         }
 
         if (isBlacklisted !== undefined) {
-            creditor.isBlacklisted = isBlacklisted;
+            creditor.isBlacklisted = Boolean(isBlacklisted);
             if (isBlacklisted) {
                 creditor.blacklistReason = blacklistReason || "Manual blacklist";
             } else {

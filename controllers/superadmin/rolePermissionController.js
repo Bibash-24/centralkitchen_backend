@@ -2,11 +2,12 @@ const RolePermission = require("../../models/superadmin/rolePermissionModel");
 const createHttpError = require("http-errors");
 
 const defaultRolesList = [
-    {
-        role: "Admin",
-        allowedMenus: ["home", "orders", "sales", "expenses", "accounts", "customers", "vendors", "creditors", "inventory", "menuSetup", "settings", "reports", "support"],
-        allowedSubMenus: ["home-boh", "home-date-filter", "home-popular-dishes", "home-revenue-breakdown", "home-payment-mix", "home-expense-trend", "home-expense-breakdown", "home-creditors-ledger", "items", "categories", "details", "ratios", "users", "permissions", "sales-revenue", "financial-payments", "stock-inventory", "expenses-costs", "profitability", "support-guide", "issues"]
-    }
+    { role: "Manager", allowedMenus: ["home", "deliveries", "sales", "expenses", "accounts", "inventory", "creditors", "customers", "vendors", "staff", "menuSetup", "reports", "settings", "support"], allowedSubMenus: ["home-boh", "home-date-filter", "home-popular-dishes", "home-revenue-breakdown", "home-payment-mix", "home-expense-trend", "home-expense-breakdown", "home-creditors-ledger", "items", "categories", "details", "ratios", "users", "permissions", "list", "credit-setup", "customers", "inventory-list", "inventory-setup", "vendors-directory", "cheque-setup", "staff-list", "staff-attendance", "staff-payroll", "sales-revenue", "financial-payments", "stock-inventory", "expenses-costs", "profitability", "deliveries-list", "deliveries-setup", "support-guide", "issues"] },
+    { role: "Cashier", allowedMenus: ["home", "sales", "deliveries", "customers", "creditors", "settings", "support"], allowedSubMenus: ["home-boh", "home-date-filter", "details", "list", "customers", "deliveries-list", "support-guide", "issues"] },
+    { role: "Staff", allowedMenus: ["home", "sales", "deliveries", "settings", "support"], allowedSubMenus: ["home-boh", "details", "deliveries-list", "support-guide"] },
+    { role: "Kitchen Staff", allowedMenus: ["home", "deliveries", "menuSetup", "settings", "support"], allowedSubMenus: ["home-boh", "items", "categories", "details", "deliveries-list"] },
+    { role: "Accountant", allowedMenus: ["home", "sales", "expenses", "accounts", "creditors", "vendors", "reports", "settings", "support"], allowedSubMenus: ["home-boh", "home-date-filter", "details", "list", "credit-setup", "vendors-directory", "cheque-setup", "sales-revenue", "financial-payments", "expenses-costs", "profitability"] },
+    { role: "Rider", allowedMenus: ["home", "deliveries", "settings", "support"], allowedSubMenus: ["home-boh", "details", "deliveries-list", "support-guide", "issues"] }
 ];
 
 const getRolePermissions = async (req, res, next) => {
@@ -33,10 +34,12 @@ const getRolePermissions = async (req, res, next) => {
                 let allowedMenus = item.allowedMenus;
                 let allowedSubMenus = item.allowedSubMenus;
 
-                if (targetSlug !== "global") {
-                    allowedMenus = (companyEnabledModules || []).filter(m => m === "settings" || m === "support" || (companyEnabledModules && companyEnabledModules.includes(m)));
+                if (targetSlug !== "global" && Array.isArray(companyEnabledModules) && companyEnabledModules.length > 0) {
+                    allowedMenus = item.allowedMenus.filter(m => m === "settings" || companyEnabledModules.includes(m));
                     if (!allowedMenus.includes("settings")) allowedMenus.push("settings");
-                    allowedSubMenus = (companyEnabledSubMenus || []).filter(s => s === "details" || (companyEnabledSubMenus && companyEnabledSubMenus.includes(s)));
+                }
+                if (targetSlug !== "global" && Array.isArray(companyEnabledSubMenus) && companyEnabledSubMenus.length > 0) {
+                    allowedSubMenus = item.allowedSubMenus.filter(s => s === "details" || companyEnabledSubMenus.includes(s));
                     if (!allowedSubMenus.includes("details")) allowedSubMenus.push("details");
                 }
 

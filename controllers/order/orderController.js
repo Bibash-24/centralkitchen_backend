@@ -77,7 +77,7 @@ const createDeliveryOrder = async (req, res, next) => {
 // Fetch delivery orders with filtering & search
 const getDeliveryOrders = async (req, res, next) => {
     try {
-        const { status, search } = req.query;
+        const { status, search, period, startDate, endDate } = req.query;
         const companySlug = req.user?.companySlug || req.companySlug || "main-kitchen";
 
         let filterConditions = [
@@ -105,6 +105,30 @@ const getDeliveryOrders = async (req, res, next) => {
                     { deliveryAddress: searchRegex }
                 ]
             });
+        }
+
+        // Date period filter
+        if (period === "today") {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const tomorrow = new Date(today);
+            tomorrow.setDate(tomorrow.getDate() + 1);
+            filterConditions.push({ createdAt: { $gte: today, $lt: tomorrow } });
+        } else if (period === "7days") {
+            const sevenDaysAgo = new Date();
+            sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+            sevenDaysAgo.setHours(0, 0, 0, 0);
+            filterConditions.push({ createdAt: { $gte: sevenDaysAgo } });
+        } else if (period === "month") {
+            const startOfMonth = new Date();
+            startOfMonth.setDate(1);
+            startOfMonth.setHours(0, 0, 0, 0);
+            filterConditions.push({ createdAt: { $gte: startOfMonth } });
+        } else if (period === "custom" && startDate) {
+            const s = new Date(startDate);
+            const e = endDate ? new Date(endDate) : new Date();
+            e.setHours(23, 59, 59, 999);
+            filterConditions.push({ createdAt: { $gte: s, $lte: e } });
         }
 
         const query = { $and: filterConditions };
