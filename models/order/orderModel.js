@@ -24,7 +24,7 @@ const orderTimelineSchema = new mongoose.Schema({
 const orderSchema = new mongoose.Schema({
   companySlug: {
     type: String,
-    default: "main-kitchen",
+    
     required: true,
     index: true
   },

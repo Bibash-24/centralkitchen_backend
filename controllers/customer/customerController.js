@@ -41,7 +41,7 @@ const getCustomers = async (req, res, next) => {
 const createCustomer = async (req, res, next) => {
   try {
     const { companySlug, name, phone, email, address, creditLimit, currentBalance, isBlacklisted, blacklistReason } = req.body;
-    const targetSlug = companySlug || req.headers["x-company-slug"] || req.user?.companySlug || "main-kitchen";
+    const targetSlug = companySlug || req.headers["x-company-slug"] || req.user?.companySlug ;
 
     if (!name || !name.trim()) return next(createError(400, "Customer name is required!"));
     if (!phone || !phone.trim()) return next(createError(400, "Phone number is required!"));

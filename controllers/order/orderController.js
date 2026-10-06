@@ -17,16 +17,27 @@ const createDeliveryOrder = async (req, res, next) => {
             return res.status(400).json({ success: false, message: "At least one order item is required." });
         }
 
-        const companySlug = req.user?.companySlug || req.companySlug || "main-kitchen";
+        const companySlug = req.body?.companySlug || req.query?.companySlug || req.user?.companySlug || req.companySlug ;
 
-        // Get next sequence for orderNo
-        const counter = await Counter.findByIdAndUpdate(
-            { _id: { companySlug, seqName: "orderNo" } },
-            { $inc: { seq: 1 } },
-            { new: true, upsert: true }
-        );
+        // Get guaranteed unique orderNo sequence using global orderNo counter
+        let orderNo = req.body?.orderNo;
+        if (!orderNo || (await Order.findOne({ orderNo }))) {
+            let isUnique = false;
+            while (!isUnique) {
+                const counter = await Counter.findByIdAndUpdate(
+                    { _id: { companySlug: "global", seqName: "orderNo" } },
+                    { $inc: { seq: 1 } },
+                    { new: true, upsert: true }
+                );
 
-        const orderNo = `CK-${String(counter.seq).padStart(4, "0")}`;
+                const candidate = `CK-${String(counter.seq).padStart(4, "0")}`;
+                const existing = await Order.findOne({ orderNo: candidate });
+                if (!existing) {
+                    orderNo = candidate;
+                    isUnique = true;
+                }
+            }
+        }
         
         const cleanedItems = items.map(item => ({
             menuItemId: item.menuItemId,
@@ -39,6 +50,7 @@ const createDeliveryOrder = async (req, res, next) => {
 
         const totalAmount = cleanedItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
         const actorName = req.user ? (req.user.name || req.user.username) : "Kitchen Staff";
+        const initialStatus = req.body?.deliveryStatus || "Created";
 
         const newOrder = new Order({
             companySlug,
@@ -50,10 +62,10 @@ const createDeliveryOrder = async (req, res, next) => {
             items: cleanedItems,
             totalAmount,
             paymentMethod: paymentMethod || "Cash on Delivery",
-            deliveryStatus: "Created",
+            deliveryStatus: initialStatus,
             timeline: [{
-                action: "Order Created",
-                status: "Created",
+                action: `Order ${initialStatus === 'PENDING_APPROVAL' ? 'Submitted for Approval' : 'Created'}`,
+                status: initialStatus,
                 timestamp: new Date(),
                 user: actorName,
                 notes: "Delivery order entered into system."
@@ -78,7 +90,7 @@ const createDeliveryOrder = async (req, res, next) => {
 const getDeliveryOrders = async (req, res, next) => {
     try {
         const { status, search, period, startDate, endDate } = req.query;
-        const companySlug = req.user?.companySlug || req.companySlug || "main-kitchen";
+        const companySlug = req.query?.companySlug || req.body?.companySlug || req.user?.companySlug || req.companySlug ;
 
         let filterConditions = [
             { isDeleted: false },
@@ -149,8 +161,8 @@ const updateDeliveryStatus = async (req, res, next) => {
         const { id } = req.params;
         const { status, notes } = req.body;
 
-        const validStatuses = ["Created", "Preparing", "Ready for Dispatch", "Out for Delivery", "Delivered", "Cancelled"];
-        if (!validStatuses.includes(status)) {
+        const validStatuses = ["Created", "Preparing", "Ready for Dispatch", "Out for Delivery", "Delivered", "Cancelled", "PENDING_APPROVAL", "APPROVED", "REJECTED"];
+        if (status && !validStatuses.includes(status)) {
             return res.status(400).json({ success: false, message: "Invalid delivery status" });
         }
 
@@ -159,16 +171,18 @@ const updateDeliveryStatus = async (req, res, next) => {
             return res.status(404).json({ success: false, message: "Delivery order not found" });
         }
 
-        order.deliveryStatus = status;
-        if (status === "Delivered") {
-            order.paymentStatus = "Paid";
+        if (status) {
+            order.deliveryStatus = status;
+            if (status === "Delivered") {
+                order.paymentStatus = "Paid";
+            }
         }
 
         const actorName = req.user ? (req.user.name || req.user.username) : "Kitchen Staff";
 
         order.timeline.push({
-            action: `Status changed to ${status}`,
-            status: status,
+            action: `Status changed to ${status || 'Updated'}`,
+            status: status || order.deliveryStatus,
             timestamp: new Date(),
             user: actorName,
             notes: notes || ""
@@ -179,7 +193,7 @@ const updateDeliveryStatus = async (req, res, next) => {
 
         res.status(200).json({
             success: true,
-            message: `Order status updated to ${status}`,
+            message: `Order status updated to ${status || order.deliveryStatus}`,
             data: order
         });
     } catch (err) {
@@ -212,8 +226,8 @@ const assignRider = async (req, res, next) => {
 
         const actorName = req.user ? (req.user.name || req.user.username) : "Kitchen Staff";
 
-        // Auto move status to Out for Delivery if currently Ready for Dispatch or Created
-        if (order.deliveryStatus === "Created" || order.deliveryStatus === "Ready for Dispatch" || order.deliveryStatus === "Preparing") {
+        // Auto move status to Out for Delivery if currently Ready for Dispatch, Created, APPROVED, or Preparing
+        if (["Created", "Ready for Dispatch", "Preparing", "APPROVED"].includes(order.deliveryStatus)) {
             order.deliveryStatus = "Out for Delivery";
         }
 

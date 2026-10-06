@@ -1,9 +1,10 @@
 const tenantContext = (req, res, next) => {
-    // Extract tenant slug from header or JWT user payload
+    const querySlug = req.query?.companySlug;
+    const bodySlug = req.body?.companySlug;
     const headerSlug = req.headers["x-company-slug"];
     const userSlug = req.user?.companySlug;
 
-    req.companySlug = headerSlug || userSlug || "main-kitchen";
+    req.companySlug = querySlug || bodySlug || headerSlug || userSlug || null;
     next();
 };
 

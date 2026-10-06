@@ -29,7 +29,7 @@ const getCreditors = async (req, res, next) => {
 
 const createCreditor = async (req, res, next) => {
     try {
-        const targetSlug = req.body.companySlug || req.headers["x-company-slug"] || req.user?.companySlug || "main-kitchen";
+        const targetSlug = req.body.companySlug || req.headers["x-company-slug"] || req.user?.companySlug ;
         const { name, phone, address, email, creditLimit, existingCreditAmount, currentBalance, openingBalance } = req.body;
         if (!name || !phone || !address) {
             const error = createError(400, "Full Name, Phone Number, and Address are required!");

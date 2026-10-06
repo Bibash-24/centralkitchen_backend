@@ -42,7 +42,7 @@ const register = async (req, res, next) => {
 
         const createdBy = (req.user && (req.user.email || req.user.phone)) ? (req.user.email || String(req.user.phone)) : "Self Registered";
         const isApproved = reqIsApproved || (createdBy !== "Self Registered" ? "approved" : "pending");
-        const targetCompanySlug = reqCompanySlug || (req.headers && req.headers["x-company-slug"]) || (req.user && req.user.companySlug) || "main-kitchen";
+        const targetCompanySlug = reqCompanySlug || (req.headers && req.headers["x-company-slug"]) || (req.user && req.user.companySlug) ;
         const newUser = new User({ name: name.trim(), phone, email: email.toLowerCase().trim(), password, role: role || "", companySlug: targetCompanySlug, pin: cleanPin || undefined, createdBy, isApproved });
         await newUser.save();
 
