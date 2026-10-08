@@ -24,6 +24,7 @@ const restaurantConfigSchema = new mongoose.Schema({
         type: String,
         default: ""
     },
+    enableCommodityRatio: { type: Boolean, default: true },
     defaultCurrency: {
         type: String,
         default: "रु"

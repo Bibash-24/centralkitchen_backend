@@ -1,10 +1,11 @@
-﻿const Order = { find: () => [] };
+﻿const Order = require("../../models/order/orderModel");
 const Inventory = require("../../models/inventory/inventoryModel");
 const Expense = require("../../models/expense/expenseModel");
 const Purchase = require("../../models/vendor/purchaseModel");
 const Creditor = require("../../models/creditor/creditorModel");
-const Customer = { find: () => ({ populate: () => [] }) };
+const Customer = require("../../models/customer/customerModel");
 const MenuItem = require("../../models/menuItem/menuItemModel");
+const RestaurantConfig = require("../../models/restaurant/restaurantModel");
 const createHttpError = require("http-errors");
 
 // Helper to parse date ranges
@@ -14,7 +15,10 @@ const parseDateRange = (startDate, endDate, period) => {
 
     if (period) {
         const today = new Date();
-        if (period === "today") {
+        if (period === "all") {
+            start = new Date("2000-01-01");
+            end = new Date("2099-12-31");
+        } else if (period === "today") {
             start = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0, 0);
             end = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999);
         } else if (period === "yesterday") {
@@ -48,14 +52,17 @@ const parseDateRange = (startDate, endDate, period) => {
 // 1. Sales & Revenue Reports
 const getSalesRevenueReport = async (req, res, next) => {
     try {
-        const { startDate, endDate, period } = req.query;
+        const { startDate, endDate, period, companySlug } = req.query;
+        const targetCompany = companySlug || req.user?.companySlug;
+        const companyFilter = targetCompany ? { companySlug: targetCompany } : {};
         const { start, end } = parseDateRange(startDate, endDate, period);
 
         // Fetch completed orders within range
         const orders = await Order.find({
-            orderStatus: "Completed",
+            ...companyFilter,
+            isDeleted: { $ne: true },
             createdAt: { $gte: start, $lte: end }
-        }).populate("table");
+        });
 
         // A. Daily Sales Summary (Z-Report)
         const dailySummaryMap = {};
@@ -69,9 +76,9 @@ const getSalesRevenueReport = async (req, res, next) => {
             const d = new Date(order.createdAt);
             const dateKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
             const bills = order.bills || {};
-            const salesVal = bills.totalWithTax || 0;
-            const taxVal = bills.tax || 0;
-            const discountVal = bills.discount || 0;
+            const salesVal = Number(order.totalAmount || order.total || order.grandTotal || order.amount || order.finalAmount || bills.totalWithTax || bills.total || (order.items || []).reduce((s, i) => s + (i.totalPrice || ((i.price || 0) * (i.quantity || 1))), 0) || 0);
+            const taxVal = Number(order.tax || order.taxAmount || order.vat || bills.tax || 0);
+            const discountVal = Number(order.discount || order.discountAmount || bills.discount || 0);
             const guestsVal = order.customerDetails?.guests || 0;
 
             if (!dailySummaryMap[dateKey]) {
@@ -119,9 +126,9 @@ const getSalesRevenueReport = async (req, res, next) => {
         const itemPerfMap = {};
         orders.forEach(order => {
             (order.items || []).forEach(item => {
-                const name = item.name;
-                const qty = item.quantity || 0;
-                const price = item.price || 0;
+                const name = item.name || item.itemName || item.title || item.productName || (typeof item.menuItem === "object" ? item.menuItem?.name : item.menuItem) || "Unnamed Item";
+                const qty = Number(item.quantity || item.qty || item.count || 1);
+                const price = item.totalPrice || ((item.price || 0) * (item.quantity || 1));
 
                 if (!itemPerfMap[name]) {
                     itemPerfMap[name] = {
@@ -141,7 +148,7 @@ const getSalesRevenueReport = async (req, res, next) => {
         })).sort((a, b) => b.quantitySold - a.quantitySold);
 
         // C. Category Sales Report
-        const menuItems = await MenuItem.find().populate("category");
+        const menuItems = await MenuItem.find({ ...companyFilter, isDeleted: { $ne: true } }).populate("category");
         const categoryMap = {};
         menuItems.forEach(item => {
             categoryMap[item.name] = item.category?.name || "Uncategorized";
@@ -152,7 +159,7 @@ const getSalesRevenueReport = async (req, res, next) => {
             (order.items || []).forEach(item => {
                 const catName = categoryMap[item.name] || (item.categoryName ? item.categoryName : "Uncategorized");
                 const qty = item.quantity || 0;
-                const price = item.price || 0;
+                const price = item.totalPrice || ((item.price || 0) * (item.quantity || 1));
 
                 if (!categorySalesMap[catName]) {
                     categorySalesMap[catName] = {
@@ -186,10 +193,10 @@ const getSalesRevenueReport = async (req, res, next) => {
         orders.forEach(order => {
             const hour = new Date(order.createdAt).getHours();
             const bills = order.bills || {};
-            const rev = bills.totalWithTax || 0;
-            const taxVal = bills.tax || 0;
-            const discountVal = bills.discount || 0;
-            const guestsVal = order.customerDetails?.guests || 0;
+            const rev = Number(order.totalAmount || order.total || order.grandTotal || order.amount || order.finalAmount || bills.totalWithTax || bills.total || (order.items || []).reduce((s, i) => s + (i.totalPrice || ((i.price || 0) * (i.quantity || 1))), 0) || 0);
+            const taxVal = Number(order.tax || order.taxAmount || order.vat || bills.tax || 0);
+            const discountVal = Number(order.discount || order.discountAmount || bills.discount || 0);
+            const guestsVal = order.customerDetails?.guests || order.guests || 0;
 
             hourlySalesMap[hour].ordersCount += 1;
             hourlySalesMap[hour].revenue += rev;
@@ -298,12 +305,15 @@ const getSalesRevenueReport = async (req, res, next) => {
 // 2. Financial & Payment Reports
 const getFinancialPaymentsReport = async (req, res, next) => {
     try {
-        const { startDate, endDate, period } = req.query;
+        const { startDate, endDate, period, companySlug } = req.query;
+        const targetCompany = companySlug || req.user?.companySlug;
+        const companyFilter = targetCompany ? { companySlug: targetCompany } : {};
         const { start, end } = parseDateRange(startDate, endDate, period);
 
         // Fetch completed orders within range
         const orders = await Order.find({
-            orderStatus: "Completed",
+            ...companyFilter,
+            isDeleted: { $ne: true },
             createdAt: { $gte: start, $lte: end }
         });
 
@@ -323,7 +333,7 @@ const getFinancialPaymentsReport = async (req, res, next) => {
             }
 
             const key = method.toLowerCase();
-            const rev = order.bills?.totalWithTax || 0;
+            const rev = order.bills?.totalWithTax || order.totalAmount || 0;
 
             if (!paymentMap[key]) {
                 paymentMap[key] = {
@@ -367,7 +377,7 @@ const getFinancialPaymentsReport = async (req, res, next) => {
         };
 
         // C. Credit Waiver & Outstanding Ledger (Creditor Report)
-        const creditors = await Creditor.find({ isDeleted: { $ne: true } });
+        const creditors = await Creditor.find({ ...companyFilter, isDeleted: { $ne: true } });
         const creditorLedger = creditors.map(c => {
             const history = (c.creditHistory || []).filter(h => {
                 const ts = new Date(h.timestamp);
@@ -438,7 +448,9 @@ const getFinancialPaymentsReport = async (req, res, next) => {
 // 3. Stock & Inventory Reports
 const getStockInventoryReport = async (req, res, next) => {
     try {
-        const { startDate, endDate, period } = req.query;
+        const { startDate, endDate, period, companySlug } = req.query;
+        const targetCompany = companySlug || req.user?.companySlug;
+        const companyFilter = targetCompany ? { companySlug: targetCompany } : {};
         const { start, end } = parseDateRange(startDate, endDate, period);
 
         // A. Current Stock & Reorder Report
@@ -465,39 +477,80 @@ const getStockInventoryReport = async (req, res, next) => {
             };
         });
 
-        // B. Inventory Commodity Usage (COGS)
+        // B. Inventory / Product COGS & Commodity Usage
         const orders = await Order.find({
-            orderStatus: "Completed",
+            ...companyFilter,
+            isDeleted: { $ne: true },
             createdAt: { $gte: start, $lte: end }
         });
 
-        const menuItems = await MenuItem.find({ isDeleted: { $ne: true } }).populate("recipe.inventoryItem");
+        const config = await RestaurantConfig.findOne({ ...companyFilter });
+        const menuItems = await MenuItem.find({ ...companyFilter, isDeleted: { $ne: true } }).populate("recipe.inventoryItem");
+        const inventoryItems = await Inventory.find({ ...companyFilter, isDeleted: { $ne: true } });
+        const purchases = await Purchase.find({ ...companyFilter, purchaseDate: { $gte: start, $lte: end } }).populate("item").populate("vendor");
+
+        const hasRecipes = menuItems.some(i => i.recipe && i.recipe.length > 0);
+        const isCommodityRatioEnabled = config?.enableCommodityRatio !== false && hasRecipes;
+
+        const depletedMap = {};
         const recipeMap = {};
         menuItems.forEach(item => {
             recipeMap[item.name] = item.recipe || [];
         });
 
-        const depletedMap = {};
+        const invMap = {};
+        inventoryItems.forEach(inv => {
+            invMap[inv.name] = inv;
+            invMap[inv._id.toString()] = inv;
+        });
+
+        const purchasePriceMap = {};
+        purchases.forEach(p => {
+            if (p.item) {
+                const itemId = p.item._id ? p.item._id.toString() : p.item.toString();
+                const uCost = p.unitCost || (p.quantity > 0 ? p.totalCost / p.quantity : 0);
+                if (uCost > 0) purchasePriceMap[itemId] = uCost;
+            }
+        });
+
         orders.forEach(order => {
             (order.items || []).forEach(item => {
-                const recipe = recipeMap[item.name] || [];
-                const qty = item.quantity || 0;
+                const itemName = item.name || item.itemName || "Item";
+                const qty = item.quantity || 1;
+                const recipe = recipeMap[itemName] || [];
 
-                recipe.forEach(rec => {
-                    const invItem = rec.inventoryItem;
-                    if (invItem) {
-                        const id = invItem._id.toString();
-                        if (!depletedMap[id]) {
-                            depletedMap[id] = {
-                                name: invItem.name,
-                                unit: invItem.unit,
-                                unitCost: invItem.cost || 0,
-                                quantityUsed: 0
-                            };
+                if (isCommodityRatioEnabled && recipe.length > 0) {
+                    recipe.forEach(rec => {
+                        const invItem = rec.inventoryItem;
+                        if (invItem) {
+                            const id = invItem._id ? invItem._id.toString() : String(invItem);
+                            const unitCost = invItem.cost || purchasePriceMap[id] || 0;
+                            if (!depletedMap[id]) {
+                                depletedMap[id] = {
+                                    name: invItem.name || itemName,
+                                    unit: invItem.unit || "unit",
+                                    unitCost,
+                                    quantityUsed: 0
+                                };
+                            }
+                            depletedMap[id].quantityUsed += (rec.ratio * qty);
                         }
-                        depletedMap[id].quantityUsed += (rec.ratio * qty);
+                    });
+                } else {
+                    const invItem = invMap[itemName];
+                    const id = invItem ? invItem._id.toString() : itemName;
+                    const unitCost = invItem?.cost || (invItem ? purchasePriceMap[invItem._id.toString()] : 0) || Number(item.costPrice || item.price || 0);
+                    
+                    if (!depletedMap[id]) {
+                        depletedMap[id] = {
+                            name: invItem?.name || itemName,
+                            unit: invItem?.unit || "unit",
+                            unitCost,
+                            quantityUsed: 0
+                        };
                     }
-                });
+                    depletedMap[id].quantityUsed += qty;
+                }
             });
         });
 
@@ -514,7 +567,8 @@ const getStockInventoryReport = async (req, res, next) => {
         const totalCOGSValue = commodityUsage.reduce((sum, item) => sum + item.totalCost, 0);
 
         // C. Vendor Purchase & Settlement Report
-        const purchases = await Purchase.find({
+        purchases = await Purchase.find({
+            ...companyFilter,
             purchaseDate: { $gte: start, $lte: end }
         }).populate("item").populate("vendor");
 
@@ -563,11 +617,14 @@ const getStockInventoryReport = async (req, res, next) => {
 // 4. Expense & Cost Reports
 const getExpensesCostsReport = async (req, res, next) => {
     try {
-        const { startDate, endDate, period } = req.query;
+        const { startDate, endDate, period, companySlug } = req.query;
+        const targetCompany = companySlug || req.user?.companySlug;
+        const companyFilter = targetCompany ? { companySlug: targetCompany } : {};
         const { start, end } = parseDateRange(startDate, endDate, period);
 
         // Fetch operational expenses
         const expenses = await Expense.find({
+            ...companyFilter,
             date: { $gte: start, $lte: end }
         }).populate("vendor").populate("staff");
 
@@ -621,12 +678,15 @@ const getExpensesCostsReport = async (req, res, next) => {
 // 5. Profitability Analysis (Profit & Loss Snapshot)
 const getProfitabilityReport = async (req, res, next) => {
     try {
-        const { startDate, endDate, period } = req.query;
+        const { startDate, endDate, period, companySlug } = req.query;
+        const targetCompany = companySlug || req.user?.companySlug;
+        const companyFilter = targetCompany ? { companySlug: targetCompany } : {};
         const { start, end } = parseDateRange(startDate, endDate, period);
 
         // A. Gross Sales & Discounts (Completed Orders)
         const orders = await Order.find({
-            orderStatus: "Completed",
+            ...companyFilter,
+            isDeleted: { $ne: true },
             createdAt: { $gte: start, $lte: end }
         });
 
@@ -643,31 +703,62 @@ const getProfitabilityReport = async (req, res, next) => {
 
         const netSales = grossSales - discounts;
 
-        // B. COGS (Cost of Goods Sold from dynamic inventory usage)
-        const menuItems = await MenuItem.find({ isDeleted: { $ne: true } }).populate("recipe.inventoryItem");
+        // B. COGS (Cost of Goods Sold from Commodity Ratios OR Product Purchases)
+        const config = await RestaurantConfig.findOne({ ...companyFilter });
+        const menuItems = await MenuItem.find({ ...companyFilter, isDeleted: { $ne: true } }).populate("recipe.inventoryItem");
+        const inventoryItems = await Inventory.find({ ...companyFilter, isDeleted: { $ne: true } });
+        const purchases = await Purchase.find({ ...companyFilter, purchaseDate: { $gte: start, $lte: end } });
+
+        const hasRecipes = menuItems.some(i => i.recipe && i.recipe.length > 0);
+        const isCommodityRatioEnabled = config?.enableCommodityRatio !== false && hasRecipes;
+
         const recipeMap = {};
         menuItems.forEach(item => {
             recipeMap[item.name] = item.recipe || [];
         });
 
+        const invMap = {};
+        inventoryItems.forEach(inv => {
+            invMap[inv.name] = inv;
+            invMap[inv._id.toString()] = inv;
+        });
+
+        const purchasePriceMap = {};
+        purchases.forEach(p => {
+            if (p.item) {
+                const itemId = p.item.toString();
+                const uCost = p.unitCost || (p.quantity > 0 ? p.totalCost / p.quantity : 0);
+                if (uCost > 0) purchasePriceMap[itemId] = uCost;
+            }
+        });
+
         let cogs = 0;
         orders.forEach(order => {
             (order.items || []).forEach(item => {
-                const recipe = recipeMap[item.name] || [];
-                const qty = item.quantity || 0;
+                const itemName = item.name || item.itemName || "Item";
+                const qty = item.quantity || 1;
+                const recipe = recipeMap[itemName] || [];
 
-                recipe.forEach(rec => {
-                    const invItem = rec.inventoryItem;
-                    if (invItem) {
-                        const unitCost = invItem.cost || 0;
-                        cogs += (rec.ratio * qty * unitCost);
-                    }
-                });
+                if (isCommodityRatioEnabled && recipe.length > 0) {
+                    recipe.forEach(rec => {
+                        const invItem = rec.inventoryItem;
+                        if (invItem) {
+                            const id = invItem._id ? invItem._id.toString() : String(invItem);
+                            const unitCost = invItem.cost || purchasePriceMap[id] || 0;
+                            cogs += (rec.ratio * qty * unitCost);
+                        }
+                    });
+                } else {
+                    const invItem = invMap[itemName];
+                    const unitCost = invItem?.cost || (invItem ? purchasePriceMap[invItem._id.toString()] : 0) || Number(item.costPrice || 0);
+                    cogs += (qty * unitCost);
+                }
             });
         });
 
         // C. Operating Expenses (Operational outflow)
         const expenses = await Expense.find({
+            ...companyFilter,
             date: { $gte: start, $lte: end }
         });
 
@@ -702,11 +793,13 @@ const getProfitabilityReport = async (req, res, next) => {
 // 6. CRM, Customer & Loyalty Reports
 const getCrmLoyaltyReport = async (req, res, next) => {
     try {
-        const { startDate, endDate, period } = req.query;
+        const { startDate, endDate, period, companySlug } = req.query;
+        const targetCompany = companySlug || req.user?.companySlug;
+        const companyFilter = targetCompany ? { companySlug: targetCompany } : {};
         const { start, end } = parseDateRange(startDate, endDate, period);
 
         // A. Customer Loyalty & Points Statement
-        const customers = await Customer.find({ isDeleted: { $ne: true } });
+        const customers = await Customer.find({ ...companyFilter, isDeleted: { $ne: true } });
         const loyaltyStatement = customers.map(cust => {
             const currentPoints = cust.points || 0;
             const pointsRedeemed = cust.pointsRedeemed || 0;
@@ -724,16 +817,17 @@ const getCrmLoyaltyReport = async (req, res, next) => {
 
         // B. Top Customers Report (by spend volume)
         const orders = await Order.find({
-            orderStatus: "Completed",
+            ...companyFilter,
+            isDeleted: { $ne: true },
             createdAt: { $gte: start, $lte: end }
-        }).populate("customer");
+        });
 
         const customerSalesMap = {};
         orders.forEach(order => {
-            const customerKey = order.customer ? order.customer._id.toString() : "Walk-in";
-            const customerName = order.customer ? order.customer.name : "Walk-in Customers";
-            const customerPhone = order.customer ? order.customer.phone : "N/A";
-            const rev = order.bills?.totalWithTax || 0;
+            const customerKey = order.recipientPhone || order.recipientName || "Walk-in";
+            const customerName = order.recipientName || "Walk-in Customers";
+            const customerPhone = order.recipientPhone || "N/A";
+            const rev = order.bills?.totalWithTax || order.totalAmount || 0;
 
             if (!customerSalesMap[customerKey]) {
                 customerSalesMap[customerKey] = {
@@ -752,29 +846,22 @@ const getCrmLoyaltyReport = async (req, res, next) => {
             totalSpent: Number(cust.totalSpent.toFixed(2))
         })).sort((a, b) => b.totalSpent - a.totalSpent);
 
-        // C. Staff Performance & Order Attribution
+        // C. Staff & Rider Performance & Order Attribution
         const staffAttributionMap = {};
         orders.forEach(order => {
-            // Attributed to the user in first timeline placement or approval action
-            const actorTimeline = (order.timeline || [])
-                .find(t => t.action === "Status Changed" || t.action === "Approved" || t.action === "Order Placed" || t.action === "Items Added");
-            
-            const staffName = actorTimeline ? actorTimeline.user : "Staff/System";
-            const totalWithTax = order.bills?.totalWithTax || 0;
-            const guests = order.customerDetails?.guests || 0;
+            const staffName = order.rider?.name || order.createdBy || "Unassigned Rider";
+            const totalWithTax = order.bills?.totalWithTax || order.totalAmount || 0;
 
             if (!staffAttributionMap[staffName]) {
                 staffAttributionMap[staffName] = {
                     staffName,
                     ordersCount: 0,
-                    totalSales: 0,
-                    guestsServed: 0
+                    totalSales: 0
                 };
             }
 
             staffAttributionMap[staffName].ordersCount += 1;
             staffAttributionMap[staffName].totalSales += totalWithTax;
-            staffAttributionMap[staffName].guestsServed += guests;
         });
 
         const staffPerformance = Object.values(staffAttributionMap).map(s => ({
