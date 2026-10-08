@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 
 const purchaseSchema = new mongoose.Schema({
+    companySlug: { type: String, index: true },
     item: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "Inventory",

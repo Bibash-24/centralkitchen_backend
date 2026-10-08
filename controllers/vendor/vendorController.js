@@ -298,8 +298,13 @@ const settleVendorBalance = async (req, res, next) => {
 
 const getAllPurchases = async (req, res, next) => {
     try {
-        const { startDate, endDate, period } = req.query;
+        const { startDate, endDate, period, companySlug } = req.query;
         let query = {};
+
+        const targetCompanySlug = companySlug || req.user?.companySlug;
+        if (targetCompanySlug) {
+            query.companySlug = targetCompanySlug;
+        }
 
         // Filter by date range or period
         let dateQuery = {};

@@ -77,6 +77,7 @@ const createInventoryItem = async (req, res, next) => {
             const resolvedMethod = (isPaid || isPartial) ? (paymentMethod || "Cash") : "Credit";
 
             const purchase = new Purchase({
+                companySlug: item.companySlug || req.user?.companySlug,
                 item: item._id,
                 vendor: item.vendor || null,
                 quantity: item.currentStock,
@@ -180,6 +181,7 @@ const updateInventoryItem = async (req, res, next) => {
                     const resolvedMethod = (isPaid || isPartial) ? (paymentMethod || "Cash") : "Credit";
 
                     const purchase = new Purchase({
+                        companySlug: item.companySlug || req.user?.companySlug,
                         item: item._id,
                         vendor: item.vendor,
                         quantity: item.currentStock,
@@ -211,6 +213,7 @@ const updateInventoryItem = async (req, res, next) => {
             const resolvedMethod = (isPaid || isPartial) ? (paymentMethod || "Cash") : "Credit";
 
             const purchase = new Purchase({
+                companySlug: item.companySlug || req.user?.companySlug,
                 item: item._id,
                 vendor: item.vendor || null,
                 quantity: diff,
