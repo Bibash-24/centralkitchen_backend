@@ -1,6 +1,30 @@
 const DropdownOption = require("../models/dropdownOption/dropdownOptionModel");
 
 const defaultOptions = [
+    // Delivery Status
+    { name: "Pending Approval", value: "Pending Approval", usedFor: "delivery_status" },
+    { name: "Created", value: "Created", usedFor: "delivery_status" },
+    { name: "Preparing", value: "Preparing", usedFor: "delivery_status" },
+    { name: "Ready for Dispatch", value: "Ready for Dispatch", usedFor: "delivery_status" },
+    { name: "Out for Delivery", value: "Out for Delivery", usedFor: "delivery_status" },
+    { name: "Delivered", value: "Delivered", usedFor: "delivery_status" },
+    { name: "Cancelled", value: "Cancelled", usedFor: "delivery_status" },
+    { name: "Returned", value: "Returned", usedFor: "delivery_status" },
+    // Refund Method
+    { name: "Cash", value: "Cash", usedFor: "refund_method" },
+    { name: "Bank Transfer", value: "Bank Transfer", usedFor: "refund_method" },
+    { name: "Digital Wallet", value: "Digital Wallet", usedFor: "refund_method" },
+    { name: "Store Credit", value: "Store Credit", usedFor: "refund_method" },
+    { name: "Cheque", value: "Cheque", usedFor: "refund_method" },
+    { name: "Manual Refund", value: "Manual Refund", usedFor: "refund_method" },
+    { name: "Other", value: "Other", usedFor: "refund_method" },
+    // Return Reason
+    { name: "Damaged Goods", value: "Damaged Goods", usedFor: "return_reason" },
+    { name: "Wrong Item Delivered", value: "Wrong Item Delivered", usedFor: "return_reason" },
+    { name: "Quality Issue", value: "Quality Issue", usedFor: "return_reason" },
+    { name: "Customer Rejected / Late Delivery", value: "Customer Rejected / Late Delivery", usedFor: "return_reason" },
+    { name: "Incomplete Order", value: "Incomplete Order", usedFor: "return_reason" },
+    { name: "Other", value: "Other", usedFor: "return_reason" },
     // Expense Category
     { name: "Ingredients", value: "Ingredients", usedFor: "expense_category" },
     { name: "Purchase", value: "Purchase", usedFor: "expense_category" },

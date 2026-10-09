@@ -60,7 +60,7 @@ const getSalesRevenueReport = async (req, res, next) => {
         // Fetch completed orders within range
         const orders = await Order.find({
             ...companyFilter,
-            isDeleted: { $ne: true },
+            isDeleted: { $ne: true }, deliveryStatus: { $nin: ["Cancelled", "CANCELLED", "Returned", "RETURN_INITIATED"] }, orderStatus: { $nin: ["Cancelled", "CANCELLED", "Returned", "RETURN_INITIATED"] },
             createdAt: { $gte: start, $lte: end }
         });
 
@@ -313,7 +313,7 @@ const getFinancialPaymentsReport = async (req, res, next) => {
         // Fetch completed orders within range
         const orders = await Order.find({
             ...companyFilter,
-            isDeleted: { $ne: true },
+            isDeleted: { $ne: true }, deliveryStatus: { $nin: ["Cancelled", "CANCELLED", "Returned", "RETURN_INITIATED"] }, orderStatus: { $nin: ["Cancelled", "CANCELLED", "Returned", "RETURN_INITIATED"] },
             createdAt: { $gte: start, $lte: end }
         });
 
@@ -455,7 +455,7 @@ const getStockInventoryReport = async (req, res, next) => {
 
         // A. Current Stock & Reorder Report
         const lowStockItems = await Inventory.find({
-            isDeleted: { $ne: true },
+            isDeleted: { $ne: true }, deliveryStatus: { $nin: ["Cancelled", "CANCELLED", "Returned", "RETURN_INITIATED"] }, orderStatus: { $nin: ["Cancelled", "CANCELLED", "Returned", "RETURN_INITIATED"] },
             $expr: { $lte: ["$currentStock", "$lowStockThreshold"] }
         }).populate("vendor");
 
@@ -480,7 +480,7 @@ const getStockInventoryReport = async (req, res, next) => {
         // B. Inventory / Product COGS & Commodity Usage
         const orders = await Order.find({
             ...companyFilter,
-            isDeleted: { $ne: true },
+            isDeleted: { $ne: true }, deliveryStatus: { $nin: ["Cancelled", "CANCELLED", "Returned", "RETURN_INITIATED"] }, orderStatus: { $nin: ["Cancelled", "CANCELLED", "Returned", "RETURN_INITIATED"] },
             createdAt: { $gte: start, $lte: end }
         });
 
@@ -686,7 +686,7 @@ const getProfitabilityReport = async (req, res, next) => {
         // A. Gross Sales & Discounts (Completed Orders)
         const orders = await Order.find({
             ...companyFilter,
-            isDeleted: { $ne: true },
+            isDeleted: { $ne: true }, deliveryStatus: { $nin: ["Cancelled", "CANCELLED", "Returned", "RETURN_INITIATED"] }, orderStatus: { $nin: ["Cancelled", "CANCELLED", "Returned", "RETURN_INITIATED"] },
             createdAt: { $gte: start, $lte: end }
         });
 
@@ -818,7 +818,7 @@ const getCrmLoyaltyReport = async (req, res, next) => {
         // B. Top Customers Report (by spend volume)
         const orders = await Order.find({
             ...companyFilter,
-            isDeleted: { $ne: true },
+            isDeleted: { $ne: true }, deliveryStatus: { $nin: ["Cancelled", "CANCELLED", "Returned", "RETURN_INITIATED"] }, orderStatus: { $nin: ["Cancelled", "CANCELLED", "Returned", "RETURN_INITIATED"] },
             createdAt: { $gte: start, $lte: end }
         });
 

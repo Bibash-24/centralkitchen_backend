@@ -65,21 +65,26 @@ const orderSchema = new mongoose.Schema({
   },
   paymentStatus: {
     type: String,
-    enum: ["Pending", "Paid", "Partially Paid", "Cancelled"],
+    enum: ["Pending", "Paid", "Partially Paid", "Cancelled", "Refunded"],
     default: "Pending"
   },
   deliveryStatus: {
     type: String,
-    enum: [
-      "Created",
-      "Preparing",
-      "Ready for Dispatch",
-      "Out for Delivery",
-      "Delivered",
-      "Cancelled"
-    ],
     default: "Created"
   },
+  doNumber: { type: String, default: "" },
+  vehicleNo: { type: String, default: "" },
+  cancellationReason: { type: String, default: "" },
+  returnReason: { type: String, default: "" },
+  returnType: { type: String, default: "" },
+  returnNotes: { type: String, default: "" },
+  returnedBy: { type: String, default: "" },
+  returnedAt: { type: Date, default: null },
+  cancelReason: { type: String, default: "" },
+  cancelledBy: { type: String, default: "" },
+  cancelledTimestamp: { type: Date, default: null },
+  priority: { type: String, default: "Normal" },
+  requestedDeliveryDate: { type: String, default: "" },
   rider: {
     staffId: {
       type: mongoose.Schema.Types.ObjectId,
