@@ -27,6 +27,10 @@ const creditorSchema = new mongoose.Schema({
         type: Number,
         default: 0
     },
+    storeCredit: {
+        type: Number,
+        default: 0
+    },
     isBlacklisted: {
         type: Boolean,
         default: false

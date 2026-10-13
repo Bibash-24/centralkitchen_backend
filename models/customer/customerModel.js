@@ -8,6 +8,7 @@ const customerSchema = new mongoose.Schema({
   address: { type: String, default: "" },
   creditLimit: { type: Number, default: 10000 },
   currentBalance: { type: Number, default: 0 },
+  storeCredit: { type: Number, default: 0 },
   isBlacklisted: { type: Boolean, default: false },
   blacklistReason: { type: String, default: "" },
   creditHistory: [

@@ -26,6 +26,7 @@ const defaultOptions = [
     { name: "Incomplete Order", value: "Incomplete Order", usedFor: "return_reason" },
     { name: "Other", value: "Other", usedFor: "return_reason" },
     // Expense Category
+    { name: "Order Refund", value: "Order Refund", usedFor: "expense_category" },
     { name: "Ingredients", value: "Ingredients", usedFor: "expense_category" },
     { name: "Purchase", value: "Purchase", usedFor: "expense_category" },
     { name: "Utilities", value: "Utilities", usedFor: "expense_category" },

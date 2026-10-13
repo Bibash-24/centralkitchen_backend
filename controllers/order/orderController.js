@@ -4,8 +4,322 @@ const Counter = require("../../models/counter/counterModel");
 const Staff = require("../../models/staff/staffModel");
 const Inventory = require("../../models/inventory/inventoryModel");
 const MenuItem = require("../../models/menuItem/menuItemModel");
+const Creditor = require("../../models/creditor/creditorModel");
+const Customer = require("../../models/customer/customerModel");
+const Expense = require("../../models/expense/expenseModel");
 
 // Restock inventory for cancelled orders
+
+const escapeRegex = (str) => String(str).replace(/[.*+?^$\{}()|[\]\\]/g, '\\$&');
+
+
+// Helper to sync order refund to Creditors and Customers balance and transaction history
+const syncRefundToCreditor = async (order, actorName, extraParams = {}) => {
+    try {
+        if (!order || !order.orderNo) return;
+        const targetStatus = extraParams.status || extraParams.deliveryStatus || order.deliveryStatus;
+        if (targetStatus !== "Returned") return;
+
+        const refundMethod = extraParams.returnType || extraParams.refundMethod || order.returnType || order.refundMethod || order.paymentMethod || "Cash";
+        const refundMethodNorm = String(refundMethod || "").trim().toLowerCase();
+        const isStoreCredit = refundMethodNorm === "store credit" || refundMethodNorm.includes("store credit");
+        const refundAmount = Number(order.totalAmount) || 0;
+        if (refundAmount <= 0) return;
+
+        const notesStr = extraParams.refundNotes || extraParams.returnNotes || extraParams.notes || order.refundNotes || order.returnNotes || "";
+        const returnedDate = extraParams.returnedAt || order.returnedAt || new Date();
+
+        const entityFilter = {
+            isDeleted: { $ne: true },
+            $or: [
+                { companySlug: order.companySlug },
+                { companySlug: { $exists: false } },
+                { companySlug: null }
+            ]
+        };
+
+        const phoneClean = order.recipientPhone ? String(order.recipientPhone).trim() : "";
+        const nameClean = order.recipientName ? String(order.recipientName).trim() : "";
+
+        const matchedAccounts = [];
+
+        // Check Creditors
+        let creditor = null;
+        if (phoneClean) {
+            creditor = await Creditor.findOne({
+                ...entityFilter,
+                phone: { $regex: new RegExp("^" + escapeRegex(phoneClean) + "$", "i") }
+            });
+        }
+        if (!creditor && nameClean) {
+            creditor = await Creditor.findOne({
+                ...entityFilter,
+                name: { $regex: new RegExp("^" + escapeRegex(nameClean) + "$", "i") }
+            });
+        }
+        if (creditor) matchedAccounts.push(creditor);
+
+        // Check Customers
+        let customer = null;
+        if (phoneClean) {
+            customer = await Customer.findOne({
+                ...entityFilter,
+                phone: { $regex: new RegExp("^" + escapeRegex(phoneClean) + "$", "i") }
+            });
+        }
+        if (!customer && nameClean) {
+            customer = await Customer.findOne({
+                ...entityFilter,
+                name: { $regex: new RegExp("^" + escapeRegex(nameClean) + "$", "i") }
+            });
+        }
+        if (customer) matchedAccounts.push(customer);
+
+        // If Store Credit was selected and recipient has no creditor or customer profile yet, create a Creditor profile
+        if (matchedAccounts.length === 0 && isStoreCredit && nameClean && phoneClean) {
+            const newCred = new Creditor({
+                companySlug: order.companySlug || "default",
+                name: nameClean,
+                phone: phoneClean,
+                address: order.deliveryAddress || "N/A",
+                currentBalance: 0,
+                creditLimit: 5000,
+                createdBy: actorName,
+                createdOn: new Date(),
+                creditHistory: []
+            });
+            matchedAccounts.push(newCred);
+        }
+
+        for (const targetAccount of matchedAccounts) {
+            if (!Array.isArray(targetAccount.creditHistory)) {
+                targetAccount.creditHistory = [];
+            }
+
+            const alreadyLogged = targetAccount.creditHistory.some(
+                h => (h.orderId && String(h.orderId) === String(order._id)) ||
+                     (h.orderNo && String(h.orderNo) === String(order.orderNo) && h.type === "payment" && String(h.note || "").toLowerCase().includes("refund"))
+            );
+
+            if (!alreadyLogged) {
+                const currentBal = Number(targetAccount.currentBalance) || 0;
+                let newBalance = currentBal;
+
+                if (isStoreCredit) {
+                    if (currentBal > 0) {
+                        const deduct = Math.min(currentBal, refundAmount);
+                        newBalance = Number((currentBal - deduct).toFixed(2));
+                        const excess = Number((refundAmount - deduct).toFixed(2));
+                        if (excess > 0) {
+                            targetAccount.storeCredit = Number(((Number(targetAccount.storeCredit) || 0) + excess).toFixed(2));
+                        }
+                    } else {
+                        targetAccount.storeCredit = Number(((Number(targetAccount.storeCredit) || 0) + refundAmount).toFixed(2));
+                        newBalance = 0;
+                    }
+                } else {
+                    newBalance = Math.max(0, Number((currentBal - refundAmount).toFixed(2)));
+                }
+
+                const noteLabel = isStoreCredit
+                    ? `Store Credit Refund for Order #${order.orderNo}${notesStr ? ': ' + notesStr : ''}`
+                    : `Refund (${refundMethod}) for Order #${order.orderNo}${notesStr ? ': ' + notesStr : ''}`;
+
+                targetAccount.creditHistory.push({
+                    type: "payment",
+                    amount: refundAmount,
+                    orderId: order._id,
+                    orderNo: order.orderNo,
+                    note: noteLabel,
+                    timestamp: returnedDate
+                });
+
+                targetAccount.currentBalance = newBalance;
+                targetAccount.updatedBy = actorName;
+                targetAccount.updatedOn = new Date();
+
+                await targetAccount.save();
+            } else if (isStoreCredit && (Number(targetAccount.storeCredit) || 0) === 0 && (Number(targetAccount.currentBalance) || 0) === 0) {
+                targetAccount.storeCredit = Number(((Number(targetAccount.storeCredit) || 0) + refundAmount).toFixed(2));
+                targetAccount.updatedBy = actorName;
+                targetAccount.updatedOn = new Date();
+                await targetAccount.save();
+            }
+        }
+    } catch (err) {
+        console.error("Error syncing refund to creditor/customer:", err);
+    }
+};
+
+
+// Helper to sync order refund to Expenses directory
+const syncRefundExpense = async (order, actorName, extraParams = {}) => {
+    try {
+        if (!order || !order.orderNo) return;
+        const targetStatus = extraParams.status || extraParams.deliveryStatus || order.deliveryStatus;
+        if (targetStatus !== "Returned") return;
+
+        const refundAmount = Number(order.totalAmount) || 0;
+        if (refundAmount <= 0) return;
+
+        const refundMethod = extraParams.returnType || extraParams.refundMethod || order.returnType || order.refundMethod || order.paymentMethod || "Cash";
+        const notesStr = extraParams.refundNotes || extraParams.returnNotes || extraParams.notes || order.refundNotes || order.returnNotes || "";
+        const returnedDate = extraParams.returnedAt || extraParams.refundProcessedAt || order.returnedAt || new Date();
+
+        // Check if an expense for this refund already exists to avoid duplicates
+        const existingExpense = await Expense.findOne({
+            companySlug: order.companySlug || "default",
+            description: { $regex: new RegExp("^Refund for Order #" + escapeRegex(order.orderNo), "i") }
+        });
+
+        if (existingExpense) {
+            existingExpense.amount = refundAmount;
+            existingExpense.method = refundMethod;
+            existingExpense.updatedBy = actorName;
+            await existingExpense.save();
+            return;
+        }
+
+        // Link customer if available
+        let customerId = null;
+        const phoneClean = order.recipientPhone ? String(order.recipientPhone).trim() : "";
+        if (phoneClean) {
+            const cust = await Customer.findOne({
+                phone: { $regex: new RegExp("^" + escapeRegex(phoneClean) + "$", "i") },
+                isDeleted: { $ne: true }
+            });
+            if (cust) customerId = cust._id;
+        }
+
+        const recipientLabel = order.recipientName ? " (" + order.recipientName + ")" : "";
+        const notesLabel = notesStr ? " - " + notesStr : "";
+        const desc = "Refund for Order #" + order.orderNo + recipientLabel + notesLabel;
+
+        const newExpense = new Expense({
+            companySlug: order.companySlug || "default",
+            description: desc,
+            category: "Order Refund",
+            amount: refundAmount,
+            method: refundMethod,
+            date: returnedDate,
+            customer: customerId || undefined,
+            createdBy: actorName
+        });
+
+        await newExpense.save();
+    } catch (err) {
+        console.error("Error syncing refund expense:", err);
+    }
+};
+
+// Helper to sync new credit dispatch order to Creditors and Customers balance and transaction history
+const syncOrderToCreditor = async (order, actorName) => {
+    try {
+        if (!order || !order.orderNo) return;
+        const methodNorm = String(order.paymentMethod || "").trim().toLowerCase();
+        const isCreditPayment = methodNorm === "credit";
+        const isStoreCreditPayment = methodNorm === "store credit";
+        if (!isCreditPayment && !isStoreCreditPayment) return;
+        const creditAmount = Number(order.totalAmount) || 0;
+        if (creditAmount <= 0) return;
+
+        const entityFilter = {
+            isDeleted: { $ne: true },
+            $or: [
+                { companySlug: order.companySlug },
+                { companySlug: { $exists: false } },
+                { companySlug: null }
+            ]
+        };
+
+        const phoneClean = order.recipientPhone ? String(order.recipientPhone).trim() : "";
+        const nameClean = order.recipientName ? String(order.recipientName).trim() : "";
+
+        const matchedAccounts = [];
+
+        // Check Creditors
+        let creditor = null;
+        if (phoneClean) {
+            creditor = await Creditor.findOne({
+                ...entityFilter,
+                phone: { $regex: new RegExp("^" + escapeRegex(phoneClean) + "$", "i") }
+            });
+        }
+        if (!creditor && nameClean) {
+            creditor = await Creditor.findOne({
+                ...entityFilter,
+                name: { $regex: new RegExp("^" + escapeRegex(nameClean) + "$", "i") }
+            });
+        }
+        if (creditor) matchedAccounts.push(creditor);
+
+        // Check Customers
+        let customer = null;
+        if (phoneClean) {
+            customer = await Customer.findOne({
+                ...entityFilter,
+                phone: { $regex: new RegExp("^" + escapeRegex(phoneClean) + "$", "i") }
+            });
+        }
+        if (!customer && nameClean) {
+            customer = await Customer.findOne({
+                ...entityFilter,
+                name: { $regex: new RegExp("^" + escapeRegex(nameClean) + "$", "i") }
+            });
+        }
+        if (customer) matchedAccounts.push(customer);
+
+        for (const targetAccount of matchedAccounts) {
+            if (!Array.isArray(targetAccount.creditHistory)) {
+                targetAccount.creditHistory = [];
+            }
+
+            if (isStoreCreditPayment) {
+                const alreadyLogged = targetAccount.creditHistory.some(
+                    h => (h.orderId && String(h.orderId) === String(order._id)) ||
+                         (h.orderNo && String(h.orderNo) === String(order.orderNo) && h.note && h.note.includes("Store Credit"))
+                );
+                if (!alreadyLogged) {
+                    targetAccount.creditHistory.push({
+                        type: "credit",
+                        amount: creditAmount,
+                        orderId: order._id,
+                        orderNo: order.orderNo,
+                        note: `Dispatch Order #${order.orderNo} paid via Store Credit`,
+                        timestamp: new Date()
+                    });
+                    const currentStoreCredit = Number(targetAccount.storeCredit) || 0;
+                    targetAccount.storeCredit = Math.max(0, Number((currentStoreCredit - creditAmount).toFixed(2)));
+                    targetAccount.updatedBy = actorName;
+                    targetAccount.updatedOn = new Date();
+                    await targetAccount.save();
+                }
+            } else if (isCreditPayment) {
+                const alreadyLogged = targetAccount.creditHistory.some(
+                    h => (h.orderId && String(h.orderId) === String(order._id)) ||
+                         (h.orderNo && String(h.orderNo) === String(order.orderNo) && h.type === "credit")
+                );
+                if (!alreadyLogged) {
+                    targetAccount.creditHistory.push({
+                        type: "credit",
+                        amount: creditAmount,
+                        orderId: order._id,
+                        orderNo: order.orderNo,
+                        note: `Dispatch Order #${order.orderNo} on Credit`,
+                        timestamp: new Date()
+                    });
+                    targetAccount.currentBalance = Number(((Number(targetAccount.currentBalance) || 0) + creditAmount).toFixed(2));
+                    targetAccount.updatedBy = actorName;
+                    targetAccount.updatedOn = new Date();
+                    await targetAccount.save();
+                }
+            }
+        }
+    } catch (err) {
+        console.error("Error syncing order to creditor/customer:", err);
+    }
+};
+
 const restockCancelledOrderItems = async (order, actorName, reasonLabel = "Order Cancelled Restock") => {
     try {
         if (!order || !order.items || !Array.isArray(order.items)) return;
@@ -169,6 +483,7 @@ const createDeliveryOrder = async (req, res, next) => {
         });
 
         await newOrder.save();
+        await syncOrderToCreditor(newOrder, actorName);
 
         res.status(201).json({
             success: true,
@@ -269,7 +584,8 @@ const updateDeliveryStatus = async (req, res, next) => {
 
         if (status) {
             const prevStatus = order.deliveryStatus;
-            if (["Delivered", "DELIVERED", "Cancelled", "CANCELLED"].includes(prevStatus) && status !== prevStatus) {
+            const isReturningFromDelivered = (prevStatus === "Delivered" || prevStatus === "DELIVERED") && (status === "RETURN_INITIATED" || status === "Returned");
+            if (["Delivered", "DELIVERED", "Cancelled", "CANCELLED"].includes(prevStatus) && status !== prevStatus && !isReturningFromDelivered) {
                 return res.status(400).json({
                     success: false,
                     message: `Order status is locked (${prevStatus}) and cannot be modified.`
@@ -291,15 +607,27 @@ const updateDeliveryStatus = async (req, res, next) => {
                 order.cancelledTimestamp = req.body.cancelledTimestamp || new Date();
                 order.paymentStatus = "Cancelled";
             }
-            if ((status === "RETURN_INITIATED" || status === "Returned") && prevStatus !== "RETURN_INITIATED" && prevStatus !== "Returned") {
+            if (status === "RETURN_INITIATED") {
                 const actor = req.user ? (req.user.name || req.user.username) : "Kitchen Staff";
-                await restockCancelledOrderItems(order, actor, "Order Return Restock");
-                order.paymentStatus = "Refunded";
+                if (prevStatus !== "RETURN_INITIATED" && prevStatus !== "Returned") {
+                    await restockCancelledOrderItems(order, actor, "Order Return Restock");
+                }
                 if (req.body.returnReason) order.returnReason = req.body.returnReason;
-                if (req.body.returnType) order.returnType = req.body.returnType;
                 if (req.body.returnNotes) order.returnNotes = req.body.returnNotes;
                 if (req.body.returnedBy) order.returnedBy = req.body.returnedBy;
-                if (req.body.returnedAt) order.returnedAt = req.body.returnedAt;
+                if (req.body.returnedAt) order.returnedAt = req.body.returnedAt || new Date();
+            }
+            if (status === "Returned") {
+                const actor = req.user ? (req.user.name || req.user.username) : "Kitchen Staff";
+                if (prevStatus !== "RETURN_INITIATED" && prevStatus !== "Returned") {
+                    await restockCancelledOrderItems(order, actor, "Order Return Restock");
+                }
+                order.paymentStatus = "Refunded";
+                if (req.body.returnReason) order.returnReason = req.body.returnReason;
+                if (req.body.returnType || req.body.refundMethod) order.returnType = req.body.returnType || req.body.refundMethod;
+                if (req.body.returnNotes || req.body.refundNotes) order.returnNotes = req.body.refundNotes || req.body.returnNotes;
+                if (req.body.returnedBy || req.body.refundProcessedBy) order.returnedBy = req.body.refundProcessedBy || req.body.returnedBy;
+                if (req.body.returnedAt || req.body.refundProcessedAt) order.returnedAt = req.body.refundProcessedAt || req.body.returnedAt || new Date();
             }
         }
 
@@ -316,6 +644,11 @@ const updateDeliveryStatus = async (req, res, next) => {
 
         order.updatedBy = actorName;
         await order.save();
+
+        if (status === "Returned") {
+            await syncRefundToCreditor(order, actorName, req.body);
+            await syncRefundExpense(order, actorName, req.body);
+        }
 
         res.status(200).json({
             success: true,
@@ -399,7 +732,8 @@ const updateDeliveryOrder = async (req, res, next) => {
         if (updates.deliveryStatus) {
             const prevStatus = order.deliveryStatus;
             const newStatus = updates.deliveryStatus;
-            if (["Delivered", "DELIVERED", "Cancelled", "CANCELLED"].includes(prevStatus) && newStatus !== prevStatus) {
+            const isReturningFromDelivered = (prevStatus === "Delivered" || prevStatus === "DELIVERED") && (newStatus === "RETURN_INITIATED" || newStatus === "Returned");
+            if (["Delivered", "DELIVERED", "Cancelled", "CANCELLED"].includes(prevStatus) && newStatus !== prevStatus && !isReturningFromDelivered) {
                 return res.status(400).json({
                     success: false,
                     message: `Order status is locked (${prevStatus}) and cannot be modified.`
@@ -408,14 +742,25 @@ const updateDeliveryOrder = async (req, res, next) => {
             if ((newStatus === "Cancelled" || newStatus === "CANCELLED") && prevStatus !== "Cancelled" && prevStatus !== "CANCELLED") {
                 await restockCancelledOrderItems(order, actorName, "Order Cancelled Restock");
             }
-            if ((newStatus === "RETURN_INITIATED" || newStatus === "Returned") && prevStatus !== "RETURN_INITIATED" && prevStatus !== "Returned") {
-                await restockCancelledOrderItems(order, actorName, "Order Return Restock");
-                order.paymentStatus = "Refunded";
+            if (newStatus === "RETURN_INITIATED") {
+                if (prevStatus !== "RETURN_INITIATED" && prevStatus !== "Returned") {
+                    await restockCancelledOrderItems(order, actorName, "Order Return Restock");
+                }
                 if (updates.returnReason) order.returnReason = updates.returnReason;
-                if (updates.returnType) order.returnType = updates.returnType;
                 if (updates.returnNotes) order.returnNotes = updates.returnNotes;
                 if (updates.returnedBy) order.returnedBy = updates.returnedBy;
-                if (updates.returnedAt) order.returnedAt = updates.returnedAt;
+                if (updates.returnedAt) order.returnedAt = updates.returnedAt || new Date();
+            }
+            if (newStatus === "Returned") {
+                if (prevStatus !== "RETURN_INITIATED" && prevStatus !== "Returned") {
+                    await restockCancelledOrderItems(order, actorName, "Order Return Restock");
+                }
+                order.paymentStatus = "Refunded";
+                if (updates.returnReason) order.returnReason = updates.returnReason;
+                if (updates.returnType || updates.refundMethod) order.returnType = updates.returnType || updates.refundMethod;
+                if (updates.returnNotes || updates.refundNotes) order.returnNotes = updates.refundNotes || updates.returnNotes;
+                if (updates.returnedBy || updates.refundProcessedBy) order.returnedBy = updates.refundProcessedBy || updates.returnedBy;
+                if (updates.returnedAt || updates.refundProcessedAt) order.returnedAt = updates.refundProcessedAt || updates.returnedAt || new Date();
             }
             order.deliveryStatus = newStatus;
             if (newStatus === "Delivered") {
@@ -462,6 +807,11 @@ const updateDeliveryOrder = async (req, res, next) => {
 
         order.updatedBy = actorName;
         await order.save();
+
+        if (updates.deliveryStatus === "Returned" || updates.returnType || updates.refundMethod) {
+            await syncRefundToCreditor(order, actorName, updates);
+            await syncRefundExpense(order, actorName, updates);
+        }
 
         res.status(200).json({
             success: true,
