@@ -7,6 +7,7 @@ const MenuItem = require("../../models/menuItem/menuItemModel");
 const Creditor = require("../../models/creditor/creditorModel");
 const Customer = require("../../models/customer/customerModel");
 const Expense = require("../../models/expense/expenseModel");
+const DropdownOption = require("../../models/dropdownOption/dropdownOptionModel");
 
 // Restock inventory for cancelled orders
 
@@ -573,7 +574,19 @@ const updateDeliveryStatus = async (req, res, next) => {
         const { notes } = req.body;
 
         const validStatuses = ["Created", "Preparing", "Ready for Dispatch", "Out for Delivery", "Delivered", "Cancelled", "PENDING_APPROVAL", "APPROVED", "REJECTED", "RETURN_INITIATED", "Returned"];
-        if (status && !validStatuses.includes(status)) {
+        let isStatusAllowed = validStatuses.includes(status);
+        if (status && !isStatusAllowed) {
+            const existsInDropdown = await DropdownOption.findOne({
+                usedFor: "delivery_status",
+                $or: [{ value: status }, { name: status }],
+                isActive: { $ne: false },
+                isDeleted: { $ne: true }
+            });
+            if (existsInDropdown) {
+                isStatusAllowed = true;
+            }
+        }
+        if (status && !isStatusAllowed) {
             return res.status(400).json({ success: false, message: "Invalid delivery status" });
         }
 
@@ -774,6 +787,8 @@ const updateDeliveryOrder = async (req, res, next) => {
         if (updates.notes !== undefined) order.notes = updates.notes;
         if (updates.doNumber !== undefined) order.doNumber = updates.doNumber;
         if (updates.vehicleNo !== undefined) order.vehicleNo = updates.vehicleNo;
+        if (updates.deliveryBatch !== undefined) order.deliveryBatch = updates.deliveryBatch;
+        if (updates.sourceWarehouse !== undefined) order.sourceWarehouse = updates.sourceWarehouse;
         if (updates.priority !== undefined) order.priority = updates.priority;
         if (updates.paymentMethod !== undefined) order.paymentMethod = updates.paymentMethod;
         if (updates.paymentStatus !== undefined) order.paymentStatus = updates.paymentStatus;

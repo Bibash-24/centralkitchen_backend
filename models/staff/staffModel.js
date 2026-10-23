@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 
 const staffSchema = new mongoose.Schema({
   companySlug: { type: String, required: true, index: true },
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null, index: true },
     name: {
         type: String,
         required: true

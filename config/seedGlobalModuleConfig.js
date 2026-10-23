@@ -13,6 +13,7 @@ const allSubMenus = [
     "details", "ratios", "users", "superuser", "permissions",
     "list", "credit-setup",
     "inventory-list", "inventory-setup",
+    "deliveries-list", "deliveries-setup", "deliveries-refunds", "my-deliveries",
     "vendors-directory", "cheque-setup",
     "staff-list", "staff-attendance", "staff-payroll",
     "sales-revenue", "financial-payments", "stock-inventory", "expenses-costs", "profitability",

@@ -74,6 +74,14 @@ const orderSchema = new mongoose.Schema({
   },
   doNumber: { type: String, default: "" },
   vehicleNo: { type: String, default: "" },
+  deliveryBatch: { type: String, default: "" },
+  sourceWarehouse: { type: String, default: "" },
+  receiverConfirmation: {
+    receiverName: { type: String, default: "" },
+    receiverPhone: { type: String, default: "" },
+    notes: { type: String, default: "" },
+    confirmedAt: { type: Date, default: null }
+  },
   cancellationReason: { type: String, default: "" },
   returnReason: { type: String, default: "" },
   returnType: { type: String, default: "" },

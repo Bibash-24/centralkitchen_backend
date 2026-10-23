@@ -1138,6 +1138,8 @@ app.get("/tenants-details", requireSuperadminHTML, async (req, res) => {
 // Other Endpoints
 app.use("/api/company", require("./routes/company/companyRoute"));
 app.use("/api/companies", require("./routes/company/companyRoute"));
+app.use("/api/rider/deliveries", require("./routes/rider/riderDeliveryRoute"));
+app.use("/api/rider", require("./routes/rider/riderDeliveryRoute"));
 app.use("/api/order", require("./routes/order/orderRoute"));
 app.use("/api/orders", require("./routes/order/orderRoute"));
 app.use("/api/user", require("./routes/user/userRoute"));
