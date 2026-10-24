@@ -677,7 +677,7 @@ const updateDeliveryStatus = async (req, res, next) => {
 const assignRider = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const { staffId } = req.body;
+        const { staffId, vehicleNo } = req.body;
 
         const order = await Order.findById(id);
         if (!order || order.isDeleted) {
@@ -700,11 +700,15 @@ const assignRider = async (req, res, next) => {
             assignedAt: new Date()
         };
 
+        if (vehicleNo !== undefined) {
+            order.vehicleNo = (vehicleNo || "").trim();
+        }
+
         const actorName = req.user ? (req.user.name || req.user.username) : "Kitchen Staff";
 
         // Auto move status to Out for Delivery if currently Ready for Dispatch, Created, APPROVED, or Preparing
         if (["Created", "Ready for Dispatch", "Preparing", "APPROVED"].includes(order.deliveryStatus)) {
-            order.deliveryStatus = "Out for Delivery";
+            order.deliveryStatus = "Ready for Dispatch"; if (order.status) { order.status = "Ready for Dispatch"; }
         }
 
         order.timeline.push({
@@ -712,7 +716,7 @@ const assignRider = async (req, res, next) => {
             status: order.deliveryStatus,
             timestamp: new Date(),
             user: actorName,
-            notes: `Rider Phone: ${staff.phone || 'N/A'}`
+            notes: `Rider Phone: ${staff.phone || 'N/A'}${order.vehicleNo ? ` | Vehicle: ${order.vehicleNo}` : ''}`
         });
 
         order.updatedBy = actorName;
