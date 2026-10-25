@@ -2,7 +2,7 @@ const Notification = require("../../models/notification/notificationModel");
 const Creditor = require("../../models/creditor/creditorModel");
 const RestaurantConfig = require("../../models/restaurant/restaurantModel");
 const RolePermission = require("../../models/superadmin/rolePermissionModel");
-const createError = require("../../utils/createError");
+const createError = require("http-errors");
 
 /**
  * Multi-Tenant Isolated Notification Controller
