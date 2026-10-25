@@ -185,6 +185,7 @@ const sanitizeRiderDelivery = (orderDoc) => {
             notes: o.receiverConfirmation.notes || "",
             confirmedAt: o.receiverConfirmation.confirmedAt || null
         } : null,
+        lastLocation: o.lastLocation || null,
         allowedTransitions
     };
 };
@@ -388,7 +389,7 @@ const updateRiderDeliveryStatus = async (req, res, next) => {
     try {
         const user = req.user;
         const { id } = req.params;
-        const { status: targetStatus, notes, receiverName, receiverPhone } = req.body || {};
+        const { status: targetStatus, notes, receiverName, receiverPhone, location } = req.body || {};
 
         if (!targetStatus || !String(targetStatus).trim()) {
             return res.status(400).json({ success: false, message: "Target delivery status is required." });
@@ -519,6 +520,16 @@ const updateRiderDeliveryStatus = async (req, res, next) => {
             updatedAt: new Date()
         };
 
+        if (location && (location.latitude !== undefined || location.longitude !== undefined)) {
+            setFields.lastLocation = {
+                latitude: Number(location.latitude),
+                longitude: Number(location.longitude),
+                accuracy: location.accuracy != null ? Number(location.accuracy) : null,
+                address: location.address ? String(location.address) : "",
+                updatedAt: new Date()
+            };
+        }
+
         if (isCompletingDelivery) {
             setFields.receiverConfirmation = {
                 receiverName: String(receiverName || req.body.confirmedBy).trim(),
@@ -538,6 +549,16 @@ const updateRiderDeliveryStatus = async (req, res, next) => {
             user: actorName,
             notes: notes ? `Notes: ${notes}` : `Status transitioned from ${currentPersistedStatus} to ${canonicalStatus}`
         };
+
+        if (location && (location.latitude !== undefined || location.longitude !== undefined)) {
+            internalTimelineEvent.location = {
+                latitude: Number(location.latitude),
+                longitude: Number(location.longitude),
+                accuracy: location.accuracy != null ? Number(location.accuracy) : null,
+                address: location.address ? String(location.address) : "",
+                timestamp: location.timestamp ? new Date(location.timestamp) : new Date()
+            };
+        }
 
         const updatedOrder = await Order.findOneAndUpdate(
             atomicFilter,

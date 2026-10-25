@@ -18,7 +18,14 @@ const orderTimelineSchema = new mongoose.Schema({
   status: { type: String, required: true },
   timestamp: { type: Date, default: Date.now },
   user: { type: String, default: "System" },
-  notes: { type: String, default: "" }
+  notes: { type: String, default: "" },
+  location: {
+    latitude: { type: Number, default: null },
+    longitude: { type: Number, default: null },
+    accuracy: { type: Number, default: null },
+    address: { type: String, default: "" },
+    timestamp: { type: Date, default: null }
+  }
 }, { _id: false });
 
 const orderSchema = new mongoose.Schema({
@@ -102,6 +109,13 @@ const orderSchema = new mongoose.Schema({
     name: { type: String, default: "" },
     phone: { type: String, default: "" },
     assignedAt: { type: Date, default: null }
+  },
+  lastLocation: {
+    latitude: { type: Number, default: null },
+    longitude: { type: Number, default: null },
+    accuracy: { type: Number, default: null },
+    address: { type: String, default: "" },
+    updatedAt: { type: Date, default: null }
   },
   timeline: [orderTimelineSchema],
   createdBy: {

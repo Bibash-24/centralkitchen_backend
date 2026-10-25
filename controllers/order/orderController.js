@@ -647,13 +647,30 @@ const updateDeliveryStatus = async (req, res, next) => {
         const actorName = req.user ? (req.user.name || req.user.username) : "Kitchen Staff";
 
         const finalNotes = notes || (status === "Cancelled" ? (req.body.cancellationReason || req.body.cancelReason || "") : "");
-        order.timeline.push({
+        const newTimelineEvent = {
             action: `Status changed to ${status || 'Updated'}`,
             status: status || order.deliveryStatus,
             timestamp: new Date(),
             user: actorName,
             notes: finalNotes || ""
-        });
+        };
+        if (req.body.location && (req.body.location.latitude !== undefined || req.body.location.longitude !== undefined)) {
+            newTimelineEvent.location = {
+                latitude: Number(req.body.location.latitude),
+                longitude: Number(req.body.location.longitude),
+                accuracy: req.body.location.accuracy != null ? Number(req.body.location.accuracy) : null,
+                address: req.body.location.address ? String(req.body.location.address) : "",
+                timestamp: req.body.location.timestamp ? new Date(req.body.location.timestamp) : new Date()
+            };
+            order.lastLocation = {
+                latitude: Number(req.body.location.latitude),
+                longitude: Number(req.body.location.longitude),
+                accuracy: req.body.location.accuracy != null ? Number(req.body.location.accuracy) : null,
+                address: req.body.location.address ? String(req.body.location.address) : "",
+                updatedAt: new Date()
+            };
+        }
+        order.timeline.push(newTimelineEvent);
 
         order.updatedBy = actorName;
         await order.save();
