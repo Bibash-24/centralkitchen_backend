@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 const Notification = require("../../models/notification/notificationModel");
+const RestaurantConfig = require("../../models/restaurant/restaurantModel");
 
 const DISPATCH_EVENTS = {
     NEW_ORDER: "NEW_ORDER",
@@ -11,26 +12,6 @@ const DISPATCH_EVENTS = {
     IN_TRANSIT: "IN_TRANSIT",
     DELIVERED: "DELIVERED"
 };
-
-// Default authorized internal roles for dispatch notifications
-const DEFAULT_DISPATCH_ROLES = [
-    "Admin",
-    "Company Manager",
-    "Manager",
-    "Warehouse",
-    "Warehouse Staff",
-    "Dispatch",
-    "Dispatch Staff",
-    "Central Kitchen",
-    "Kitchen Staff",
-    "Importer",
-    "Sales",
-    "Regional",
-    "Regional Manager",
-    "Franchise",
-    "Franchise User",
-    "Franchise Manager"
-];
 
 /**
  * Build professional, contextual title and message for each dispatch event
@@ -105,7 +86,9 @@ const buildNotificationContent = (event, order, extra = {}) => {
 };
 
 /**
- * Creates and persists an internal dispatch notification using existing DeliGati notification architecture
+ * Creates and persists an internal dispatch notification using existing DeliGati notification architecture.
+ * Strictly scopes every notification to order.companySlug to prevent tenant data leakage.
+ * Roles and permissions are dynamically derived from Delivery Setup (RestaurantConfig), never hardcoded.
  *
  * @param {Object} params
  * @param {string} params.event - One of DISPATCH_EVENTS
@@ -117,11 +100,30 @@ const sendDispatchNotification = async ({ event, order, actor, extra = {} }) => 
     try {
         if (!order || !order._id || !event) return null;
 
-        const companySlug = order.companySlug || "global";
+        const rawCompanySlug = order.companySlug || actor?.companySlug || "";
+        const companySlug = String(rawCompanySlug).trim();
+
+        if (!companySlug) {
+            console.warn("sendDispatchNotification skipped: missing companySlug for order", order._id);
+            return null;
+        }
+
+        const escapedCompanyRegex = {
+            $regex: new RegExp("^" + companySlug.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "$", "i")
+        };
+
+        // Query Delivery Setup dynamically for this specific company
+        const config = await RestaurantConfig.findOne({ companySlug: escapedCompanyRegex });
+        if (config && config.deliveryNotificationEnabled === false) {
+            // Delivery notifications explicitly disabled in Delivery Setup for this company
+            return null;
+        }
+
         const content = buildNotificationContent(event, order, extra);
 
-        // Deduplication guard: Prevent duplicate notification within 30 seconds for the same event and order
+        // Deduplication guard: Prevent duplicate notification within 30 seconds for the same event, order, and company
         const recentDuplicate = await Notification.findOne({
+            companySlug: escapedCompanyRegex,
             type: "dispatch",
             event,
             targetId: String(order._id),
@@ -138,6 +140,23 @@ const sendDispatchNotification = async ({ event, order, actor, extra = {} }) => 
         if (createdByUserId && mongoose.Types.ObjectId.isValid(createdByUserId)) {
             recipientUserIds.push(new mongoose.Types.ObjectId(createdByUserId));
         }
+
+        // Add explicit users configured in Delivery Setup
+        if (config && Array.isArray(config.notifyUsers)) {
+            config.notifyUsers.forEach(uid => {
+                if (uid && mongoose.Types.ObjectId.isValid(uid)) {
+                    if (!recipientUserIds.some(existing => String(existing) === String(uid))) {
+                        recipientUserIds.push(new mongoose.Types.ObjectId(uid));
+                    }
+                }
+            });
+        }
+
+        // Dynamic roles sourced directly from Delivery Setup
+        const configuredSetupRoles = (config && (config.notifyRoles || config.deliveryNotifyRoles)) || [];
+        const allowedRoles = Array.isArray(configuredSetupRoles) && configuredSetupRoles.length > 0
+            ? configuredSetupRoles
+            : ["Admin", "Manager"]; // Administrative default
 
         const notificationData = {
             companySlug,
@@ -160,7 +179,7 @@ const sendDispatchNotification = async ({ event, order, actor, extra = {} }) => 
             },
             createdByUserId: createdByUserId || null,
             recipientUserIds,
-            allowedRoles: DEFAULT_DISPATCH_ROLES,
+            allowedRoles,
             metadata: {
                 totalAmount: order.totalAmount || 0,
                 priority: order.priority || "Normal",
@@ -176,7 +195,6 @@ const sendDispatchNotification = async ({ event, order, actor, extra = {} }) => 
         const createdNotification = await Notification.create(notificationData);
         return createdNotification;
     } catch (err) {
-        // Safe logger - notification errors should not break order transaction flow
         console.error("sendDispatchNotification error:", err);
         return null;
     }
@@ -184,7 +202,6 @@ const sendDispatchNotification = async ({ event, order, actor, extra = {} }) => 
 
 module.exports = {
     DISPATCH_EVENTS,
-    DEFAULT_DISPATCH_ROLES,
-    sendDispatchNotification,
-    buildNotificationContent
+    buildNotificationContent,
+    sendDispatchNotification
 };

@@ -1,16 +1,60 @@
 const Notification = require("../../models/notification/notificationModel");
 const Creditor = require("../../models/creditor/creditorModel");
 const RestaurantConfig = require("../../models/restaurant/restaurantModel");
-const createError = require("http-errors");
+const RolePermission = require("../../models/superadmin/rolePermissionModel");
+const createError = require("../../utils/createError");
+
+/**
+ * Multi-Tenant Isolated Notification Controller
+ * Guarantees that:
+ * 1. Notifications are strictly managed and segregated by companySlug.
+ * 2. Non-superadmin users are restricted to their authenticated user's companySlug.
+ * 3. Superadmins manage notifications per-company by specifying companySlug.
+ * 4. No company/tenant notification can ever be read, marked, modified, or cleared by another tenant.
+ */
 
 const getNotifications = async (req, res, next) => {
     try {
-        await Notification.deleteMany({ type: { $in: ["order", "assistance"] } });
-        const config = await RestaurantConfig.findOne();
-        if (config && config.creditEnabled && config.creditOverdueNotificationEnabled) {
-            const creditors = await Creditor.find({ isDeleted: { $ne: true }, currentBalance: { $gt: 0 } });
+        const userRole = (req.user?.role || "").trim();
+        const userId = req.user?._id || req.user?.id;
+        const userRoleLower = userRole.toLowerCase();
+
+        // Multi-tenant resolution: Non-superadmin is strictly restricted to req.user.companySlug
+        let targetSlug = "";
+        if (userRoleLower === "superadmin") {
+            targetSlug = String(
+                req.query.companySlug ||
+                req.headers["x-company-slug"] ||
+                req.user?.companySlug ||
+                ""
+            ).toLowerCase().trim();
+        } else {
+            targetSlug = String(req.user?.companySlug || "").toLowerCase().trim();
+        }
+
+        // If no target company is determined, return empty list
+        if (!targetSlug) {
+            return res.status(200).json({
+                success: true,
+                message: "Notifications retrieved successfully",
+                data: []
+            });
+        }
+
+        const escapedSlugRegex = {
+            $regex: new RegExp("^" + targetSlug.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "$", "i")
+        };
+
+        // Fetch company-scoped configuration
+        const config = await RestaurantConfig.findOne({ companySlug: escapedSlugRegex });
+
+        // 1. Scan for Credit Overdue (Strictly scoped to targetSlug)
+        if (config && config.creditOverdueNotificationEnabled && targetSlug) {
+            const creditors = await Creditor.find({ companySlug: escapedSlugRegex, isDeleted: { $ne: true } });
             
             for (const creditor of creditors) {
+                if (creditor.currentBalance <= 0) continue;
+                
                 let oldestTimestamp = creditor.createdAt;
                 if (creditor.creditHistory && creditor.creditHistory.length > 0) {
                     const creditTx = creditor.creditHistory
@@ -26,15 +70,17 @@ const getNotifications = async (req, res, next) => {
                 
                 if (ageInDays > limitDays) {
                     const existingNotif = await Notification.findOne({
+                        companySlug: escapedSlugRegex,
                         type: "credit",
                         targetId: creditor._id.toString()
                     });
                     
                     if (!existingNotif) {
                         await Notification.create({
+                            companySlug: targetSlug,
                             type: "credit",
                             title: "Overdue Credit Alert",
-                            message: `Creditor ${creditor.name} (Phone: ${creditor.phone}) has exceeded the credit overdue limit of ${limitDays} days. Unpaid balance is रु ${creditor.currentBalance.toLocaleString('en-IN')}.`,
+                            message: `Creditor ${creditor.name} (Phone: ${creditor.phone}) has exceeded the credit overdue limit of ${limitDays} days. Unpaid balance is Rs. ${creditor.currentBalance.toLocaleString("en-IN")}.`,
                             targetId: creditor._id.toString(),
                             isRead: false
                         });
@@ -42,9 +88,10 @@ const getNotifications = async (req, res, next) => {
                 }
             }
             
-            const creditNotifications = await Notification.find({ type: "credit" });
+            // Clean up resolved credit notifications strictly for this company
+            const creditNotifications = await Notification.find({ companySlug: escapedSlugRegex, type: "credit" });
             for (const notif of creditNotifications) {
-                const creditor = await Creditor.findOne({ _id: notif.targetId, isDeleted: { $ne: true } });
+                const creditor = await Creditor.findOne({ _id: notif.targetId, companySlug: escapedSlugRegex, isDeleted: { $ne: true } });
                 if (!creditor || creditor.currentBalance <= 0) {
                     await Notification.findByIdAndDelete(notif._id);
                 } else {
@@ -64,16 +111,20 @@ const getNotifications = async (req, res, next) => {
                     }
                 }
             }
+        } else if (config && config.creditOverdueNotificationEnabled === false && targetSlug) {
+            await Notification.deleteMany({ companySlug: escapedSlugRegex, type: "credit" });
         }
 
-        // Scan for Cheques due for clearing
+        // 2. Scan for Cheques due for clearing (Strictly scoped to targetSlug)
         const Expense = require("../../models/expense/expenseModel");
-        const Purchase = require("../../models/vendor/purchaseModel");
-
-        if (config && config.chequeNotificationEnabled) {
+        if (config && config.chequeNotificationEnabled && targetSlug) {
             const limitDays = config.chequeDueDaysNotify !== undefined ? config.chequeDueDaysNotify : 2;
 
-            const chequeExpenses = await Expense.find({ method: "Cheque", chequeDate: { $exists: true, $ne: null } });
+            const chequeExpenses = await Expense.find({
+                companySlug: escapedSlugRegex,
+                method: "Cheque",
+                chequeDate: { $exists: true, $ne: null }
+            });
             for (const expense of chequeExpenses) {
                 const diffTime = new Date(expense.chequeDate) - new Date();
                 const diffDays = diffTime / (1000 * 60 * 60 * 24);
@@ -81,9 +132,10 @@ const getNotifications = async (req, res, next) => {
                 if (diffDays <= limitDays) {
                     const vendorId = expense.vendor ? expense.vendor.toString() : expense._id.toString();
                     const chequeDateStr = new Date(expense.chequeDate).toLocaleDateString();
-                    const message = `Cheque payment of रु ${expense.amount.toLocaleString('en-IN')} is due for clearing on ${chequeDateStr}. Description: ${expense.description}.`;
+                    const message = `Cheque payment of Rs. ${expense.amount.toLocaleString("en-IN")} is due for clearing on ${chequeDateStr}. Description: ${expense.description}.`;
 
                     const existingNotif = await Notification.findOne({
+                        companySlug: escapedSlugRegex,
                         type: "cheque",
                         targetId: vendorId,
                         message
@@ -91,6 +143,7 @@ const getNotifications = async (req, res, next) => {
 
                     if (!existingNotif) {
                         await Notification.create({
+                            companySlug: targetSlug,
                             type: "cheque",
                             title: "Cheque Clearing Alert",
                             message,
@@ -100,168 +153,91 @@ const getNotifications = async (req, res, next) => {
                     }
                 }
             }
-
-            const chequePurchases = await Purchase.find({ paymentMethod: "Cheque", chequeDate: { $exists: true, $ne: null } }).populate("vendor");
-            for (const purchase of chequePurchases) {
-                const diffTime = new Date(purchase.chequeDate) - new Date();
-                const diffDays = diffTime / (1000 * 60 * 60 * 24);
-
-                if (diffDays <= limitDays) {
-                    const vendorId = purchase.vendor ? (purchase.vendor._id || purchase.vendor).toString() : purchase._id.toString();
-                    const chequeDateStr = new Date(purchase.chequeDate).toLocaleDateString();
-                    const vendorName = purchase.vendor ? purchase.vendor.name : "Unknown Vendor";
-                    const message = `Cheque payment of रु ${purchase.paidAmount.toLocaleString('en-IN')} to Vendor ${vendorName} is due for clearing on ${chequeDateStr}.`;
-
-                    const existingNotif = await Notification.findOne({
-                        type: "cheque",
-                        targetId: vendorId,
-                        message
-                    });
-
-                    if (!existingNotif) {
-                        await Notification.create({
-                            type: "cheque",
-                            title: "Cheque Clearing Alert",
-                            message,
-                            targetId: vendorId,
-                            isRead: false
-                        });
-                    }
-                }
-            }
-        } else {
-            // Remove cheque notifications if disabled
-            await Notification.deleteMany({ type: "cheque" });
+        } else if (config && config.chequeNotificationEnabled === false && targetSlug) {
+            await Notification.deleteMany({ companySlug: escapedSlugRegex, type: "cheque" });
         }
 
-        // Scan for Inventory Low Stock Alerts
+        // 3. Scan for Inventory Low Stock Alerts (Strictly scoped to targetSlug)
         const Inventory = require("../../models/inventory/inventoryModel");
-        if (config && config.lowStockNotificationEnabled) {
-            const inventoryItems = await Inventory.find({ isDeleted: { $ne: true } }).select("name currentStock lowStockThreshold unit");
+        if (config && config.lowStockNotificationEnabled && targetSlug) {
+            const inventoryItems = await Inventory.find({
+                companySlug: escapedSlugRegex,
+                isDeleted: { $ne: true }
+            }).select("name currentStock lowStockThreshold unit companySlug");
+
             for (const item of inventoryItems) {
                 if (item.lowStockThreshold !== null && item.lowStockThreshold !== undefined) {
                     const targetId = `inventory_${item._id.toString()}`;
                     if (item.currentStock <= item.lowStockThreshold) {
                         const existingNotif = await Notification.findOne({
+                            companySlug: escapedSlugRegex,
                             type: "inventory",
                             targetId
                         });
                         if (!existingNotif) {
                             await Notification.create({
+                                companySlug: targetSlug,
                                 type: "inventory",
                                 title: "Low Stock Alert",
-                                message: `${item.name} is low on stock. Current: ${item.currentStock} ${item.unit || ''}, Threshold: ${item.lowStockThreshold} ${item.unit || ''}.`,
+                                message: `${item.name} is low on stock. Current: ${item.currentStock} ${item.unit || ""}, Threshold: ${item.lowStockThreshold} ${item.unit || ""}.`,
                                 targetId,
                                 isRead: false
                             });
                         }
                     } else {
-                        // Stock was replenished, auto-delete the low stock notification
+                        // Stock was replenished, auto-delete low stock notification for this company
                         await Notification.findOneAndDelete({
+                            companySlug: escapedSlugRegex,
                             type: "inventory",
                             targetId
                         });
                     }
                 }
             }
-        } else {
-            // Remove low stock alerts if notification is disabled
-            await Notification.deleteMany({ type: "inventory" });
-        }
-        
-        const RolePermission = require("../../models/superadmin/rolePermissionModel");
-        const companySlug = req.user?.companySlug || req.query.companySlug;
-        const query = {};
-        if (companySlug && req.user?.role?.toLowerCase() !== "superadmin") {
-            query.companySlug = companySlug;
+        } else if (config && config.lowStockNotificationEnabled === false && targetSlug) {
+            await Notification.deleteMany({ companySlug: escapedSlugRegex, type: "inventory" });
         }
 
-        const notifications = await Notification.find(query)
-            .sort({ createdAt: -1 });
+        // 4. Multi-Tenant Scoped Notification Query (Guarantees isolation)
+        const query = { companySlug: escapedSlugRegex };
+        const notifications = await Notification.find(query).sort({ createdAt: -1 });
 
-        const userRole = (req.user?.role || "").trim();
-        const userId = req.user?._id || req.user?.id;
-        
-        // Superadmin is not notified of operational notifications
-        if (userRole.toLowerCase() === "superadmin") {
-            return res.status(200).json({
-                success: true,
-                message: "Notifications retrieved successfully",
-                data: []
-            });
-        }
+        // --- Dynamic Setup Configurations (never hardcoded roles) ---
+        // A. Credit Overdue: Credit Setup
+        const isCreditEnabled = config?.creditEnabled !== false && config?.creditOverdueNotificationEnabled !== false;
+        const creditRoles = (config?.creditOverdueNotifyRoles || []).map(r => r.toLowerCase());
+        const isCreditAllowed = isCreditEnabled && (userRoleLower === "admin" || creditRoles.includes(userRoleLower));
 
-        const creditRoles = config?.creditOverdueNotifyRoles || ["Admin", "Cashier"];
-        const isCreditAllowed = creditRoles.some(r => r.toLowerCase() === userRole.toLowerCase());
+        // B. Cheque Clearing: Vendor/Cheque Setup
+        const isChequeEnabled = config?.chequeNotificationEnabled !== false;
+        const chequeRoles = (config?.chequeNotifyRoles || []).map(r => r.toLowerCase());
+        const isChequeAllowed = isChequeEnabled && (userRoleLower === "admin" || chequeRoles.includes(userRoleLower));
 
-        const chequeRoles = config?.chequeNotifyRoles || ["Admin", "Cashier"];
-        const isChequeAllowed = chequeRoles.some(r => r.toLowerCase() === userRole.toLowerCase());
+        // C. Low Stock: Inventory Setup
+        const isLowStockEnabled = config?.lowStockNotificationEnabled !== false;
+        const lowStockRoles = (config?.lowStockNotifyRoles || []).map(r => r.toLowerCase());
+        const isLowStockAllowed = isLowStockEnabled && (userRoleLower === "admin" || lowStockRoles.includes(userRoleLower));
 
-        const lowStockRoles = config?.lowStockNotifyRoles || ["Admin", "Cashier"];
-        const isLowStockAllowed = lowStockRoles.some(r => r.toLowerCase() === userRole.toLowerCase());
+        // D. Dispatch / Delivery: Delivery Setup
+        const isDeliveryEnabled = config?.deliveryNotificationEnabled !== false;
+        const deliveryRoles = ((config?.notifyRoles || config?.deliveryNotifyRoles) || []).map(r => r.toLowerCase());
+        const deliveryUsers = (config?.notifyUsers || []).map(id => String(id));
 
-        // Dynamic dispatch & order roles check
-        const dispatchRoles = [
-            "Admin", "Manager", "Company Manager", "Warehouse", "Warehouse Staff",
-            "Dispatch", "Dispatch Staff", "Central Kitchen", "Kitchen Staff",
-            "Importer", "Sales", "Regional", "Regional Manager",
-            "Franchise", "Franchise User", "Franchise Manager"
-        ];
-        const isDispatchRole = dispatchRoles.some(r => r.toLowerCase() === userRole.toLowerCase());
-
-        // Check RBAC permission for deliveries
+        // RBAC menu permissions check for deliveries
         let hasDeliveriesMenu = false;
-        if (companySlug && userRole) {
-            const escapedUserRole = userRole.replace(/[.*+?^${}()|[\]\\]/g, "\\const notifications = await Notification.find({})
-            .sort({ createdAt: -1 });
-
-        const userRole = req.user?.role || "";
-        
-        // Superadmin is not notified of operational notifications
-        if (userRole.toLowerCase() === "superadmin") {
-            return res.status(200).json({
-                success: true,
-                message: "Notifications retrieved successfully",
-                data: []
-            });
-        }
-
-        const creditRoles = config?.creditOverdueNotifyRoles || ["Admin", "Cashier"];
-        const isCreditAllowed = creditRoles.some(r => r.toLowerCase() === userRole.toLowerCase());
-
-        const chequeRoles = config?.chequeNotifyRoles || ["Admin", "Cashier"];
-        const isChequeAllowed = chequeRoles.some(r => r.toLowerCase() === userRole.toLowerCase());
-
-        const lowStockRoles = config?.lowStockNotifyRoles || ["Admin", "Cashier"];
-        const isLowStockAllowed = lowStockRoles.some(r => r.toLowerCase() === userRole.toLowerCase());
-        
-        let filteredNotifications = notifications;
-        if (!isCreditAllowed) {
-            filteredNotifications = filteredNotifications.filter(n => n.type !== "credit");
-        }
-        if (!isChequeAllowed) {
-            filteredNotifications = filteredNotifications.filter(n => n.type !== "cheque");
-        }
-        if (!isLowStockAllowed) {
-            filteredNotifications = filteredNotifications.filter(n => n.type !== "inventory");
-        }
-
-        res.status(200).json({
-            success: true,
-            message: "Notifications retrieved successfully",
-            data: filteredNotifications
-        });");
+        if (targetSlug && userRole) {
             const userPermDoc = await RolePermission.findOne({
-                companySlug,
-                role: { $regex: new RegExp("^" + escapedUserRole + "$", "i") },
+                companySlug: escapedSlugRegex,
+                role: { $regex: new RegExp("^" + userRole.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "$", "i") },
                 isDeleted: { $ne: true }
             });
             if (userPermDoc) {
                 hasDeliveriesMenu = (userPermDoc.allowedMenus || []).includes("deliveries");
             }
         }
-        
-        let filteredNotifications = notifications.filter(n => {
+
+        // Filter notifications dynamically according to setup rules & roles
+        const filteredNotifications = notifications.filter(n => {
             if (n.type === "credit") return isCreditAllowed;
             if (n.type === "cheque") return isChequeAllowed;
             if (n.type === "inventory") return isLowStockAllowed;
@@ -271,17 +247,26 @@ const getNotifications = async (req, res, next) => {
                 if (n.createdByUserId && userId && String(n.createdByUserId) === String(userId)) {
                     return true;
                 }
-                // 2. Explicit recipient match
-                if (Array.isArray(n.recipientUserIds) && userId && n.recipientUserIds.some(id => String(id) === String(userId))) {
+                // 2. Explicit recipient match or configured user in Delivery Setup
+                if (userId && (
+                    (Array.isArray(n.recipientUserIds) && n.recipientUserIds.some(id => String(id) === String(userId))) ||
+                    deliveryUsers.includes(String(userId))
+                )) {
                     return true;
                 }
-                // 3. Admin / Manager always authorized
-                if (userRole.toLowerCase() === "admin" || userRole.toLowerCase() === "manager") {
+                // 3. Admin is always authorized
+                if (userRoleLower === "admin") {
                     return true;
                 }
-                // 4. Role in allowedRoles or default dispatch roles
-                const notifAllowedRoles = (Array.isArray(n.allowedRoles) && n.allowedRoles.length > 0) ? n.allowedRoles : dispatchRoles;
-                if (notifAllowedRoles.some(r => r.toLowerCase() === userRole.toLowerCase())) {
+                // If delivery notifications are disabled in Delivery Setup, non-admin roles do not receive them
+                if (!isDeliveryEnabled) {
+                    return false;
+                }
+                // 4. Role configured in Delivery Setup (or on notification document)
+                const notifAllowedRoles = (Array.isArray(n.allowedRoles) && n.allowedRoles.length > 0)
+                    ? n.allowedRoles.map(r => r.toLowerCase())
+                    : deliveryRoles;
+                if (notifAllowedRoles.includes(userRoleLower)) {
                     return true;
                 }
                 // 5. RBAC permission for deliveries module
@@ -294,7 +279,7 @@ const getNotifications = async (req, res, next) => {
             return true;
         });
 
-        // Compute isRead per user using readBy tracker if present
+        // Compute isRead per user using readBy tracker
         const sanitized = filteredNotifications.map(n => {
             const notifObj = n.toObject ? n.toObject() : { ...n };
             if (userId && Array.isArray(n.readBy) && n.readBy.some(r => String(r.userId) === String(userId))) {
@@ -316,7 +301,28 @@ const getNotifications = async (req, res, next) => {
 const markRead = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const notification = await Notification.findById(id);
+        const userRoleLower = (req.user?.role || "").trim().toLowerCase();
+
+        let targetSlug = "";
+        if (userRoleLower === "superadmin") {
+            targetSlug = String(
+                req.query.companySlug ||
+                req.headers["x-company-slug"] ||
+                req.user?.companySlug ||
+                ""
+            ).toLowerCase().trim();
+        } else {
+            targetSlug = String(req.user?.companySlug || "").toLowerCase().trim();
+        }
+
+        const query = { _id: id };
+        if (targetSlug) {
+            query.companySlug = { $regex: new RegExp("^" + targetSlug.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "$", "i") };
+        } else if (userRoleLower !== "superadmin") {
+            return res.status(403).json({ success: false, message: "Unauthorized tenant access." });
+        }
+
+        const notification = await Notification.findOne(query);
         if (!notification) {
             const error = createError(404, "Notification not found");
             return next(error);
@@ -347,10 +353,29 @@ const markRead = async (req, res, next) => {
 
 const markAllRead = async (req, res, next) => {
     try {
-        const companySlug = req.user?.companySlug || req.query.companySlug;
-        const filter = (companySlug && req.user?.role !== "Superadmin") ? { companySlug } : {};
-        const userId = req.user?._id || req.user?.id;
+        const userRoleLower = (req.user?.role || "").trim().toLowerCase();
 
+        let targetSlug = "";
+        if (userRoleLower === "superadmin") {
+            targetSlug = String(
+                req.query.companySlug ||
+                req.headers["x-company-slug"] ||
+                req.user?.companySlug ||
+                ""
+            ).toLowerCase().trim();
+        } else {
+            targetSlug = String(req.user?.companySlug || "").toLowerCase().trim();
+        }
+
+        if (!targetSlug) {
+            return res.status(400).json({ success: false, message: "Company identifier required to mark notifications as read." });
+        }
+
+        const filter = {
+            companySlug: { $regex: new RegExp("^" + targetSlug.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "$", "i") }
+        };
+
+        const userId = req.user?._id || req.user?.id;
         const updateObj = { $set: { isRead: true } };
         if (userId) {
             updateObj.$addToSet = { readBy: { userId, readAt: new Date() } };
@@ -369,7 +394,28 @@ const markAllRead = async (req, res, next) => {
 const deleteNotification = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const notification = await Notification.findByIdAndDelete(id);
+        const userRoleLower = (req.user?.role || "").trim().toLowerCase();
+
+        let targetSlug = "";
+        if (userRoleLower === "superadmin") {
+            targetSlug = String(
+                req.query.companySlug ||
+                req.headers["x-company-slug"] ||
+                req.user?.companySlug ||
+                ""
+            ).toLowerCase().trim();
+        } else {
+            targetSlug = String(req.user?.companySlug || "").toLowerCase().trim();
+        }
+
+        const query = { _id: id };
+        if (targetSlug) {
+            query.companySlug = { $regex: new RegExp("^" + targetSlug.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "$", "i") };
+        } else if (userRoleLower !== "superadmin") {
+            return res.status(403).json({ success: false, message: "Unauthorized tenant access." });
+        }
+
+        const notification = await Notification.findOneAndDelete(query);
         if (!notification) {
             const error = createError(404, "Notification not found");
             return next(error);
@@ -386,7 +432,29 @@ const deleteNotification = async (req, res, next) => {
 
 const clearAllNotifications = async (req, res, next) => {
     try {
-        await Notification.deleteMany({});
+        const userRoleLower = (req.user?.role || "").trim().toLowerCase();
+
+        let targetSlug = "";
+        if (userRoleLower === "superadmin") {
+            targetSlug = String(
+                req.query.companySlug ||
+                req.headers["x-company-slug"] ||
+                req.user?.companySlug ||
+                ""
+            ).toLowerCase().trim();
+        } else {
+            targetSlug = String(req.user?.companySlug || "").toLowerCase().trim();
+        }
+
+        if (!targetSlug) {
+            return res.status(400).json({ success: false, message: "Company identifier required to clear notifications." });
+        }
+
+        const filter = {
+            companySlug: { $regex: new RegExp("^" + targetSlug.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "$", "i") }
+        };
+
+        await Notification.deleteMany(filter);
 
         res.status(200).json({
             success: true,

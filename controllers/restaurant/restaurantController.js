@@ -97,6 +97,31 @@ const updateRestaurantConfig = async (req, res, next) => {
             chequeNotificationEnabled,
             chequeNotifyRoles,
             chequeDueDaysNotify,
+            deliveryNotificationEnabled,
+            notifyRoles,
+            deliveryNotifyRoles,
+            notifyUsers,
+            deliveryAssignEnabled,
+            assignRoles,
+            assignUsers,
+            deliveryTrackEnabled,
+            trackRoles,
+            trackUsers,
+            deliveryRescheduleEnabled,
+            rescheduleRoles,
+            rescheduleUsers,
+            deliveryApproveEnabled,
+            approveRejectRoles,
+            approveRejectUsers,
+            deliveryCancelEnabled,
+            cancelRoles,
+            cancelUsers,
+            deliveryReturnEnabled,
+            returnRoles,
+            returnUsers,
+            deliveryRefundEnabled,
+            refundRoles,
+            refundUsers,
             isVatApplicable,
             vatPercentage,
             wifiPrinterIp,
@@ -150,6 +175,37 @@ const updateRestaurantConfig = async (req, res, next) => {
         if (chequeNotificationEnabled !== undefined) config.chequeNotificationEnabled = chequeNotificationEnabled;
         if (chequeNotifyRoles !== undefined) config.chequeNotifyRoles = chequeNotifyRoles;
         if (chequeDueDaysNotify !== undefined) config.chequeDueDaysNotify = chequeDueDaysNotify;
+
+        if (deliveryNotificationEnabled !== undefined) config.deliveryNotificationEnabled = deliveryNotificationEnabled;
+        if (notifyRoles !== undefined) {
+            config.notifyRoles = notifyRoles;
+            config.deliveryNotifyRoles = notifyRoles;
+        } else if (deliveryNotifyRoles !== undefined) {
+            config.notifyRoles = deliveryNotifyRoles;
+            config.deliveryNotifyRoles = deliveryNotifyRoles;
+        }
+        if (notifyUsers !== undefined) config.notifyUsers = notifyUsers;
+        if (deliveryAssignEnabled !== undefined) config.deliveryAssignEnabled = deliveryAssignEnabled;
+        if (assignRoles !== undefined) config.assignRoles = assignRoles;
+        if (assignUsers !== undefined) config.assignUsers = assignUsers;
+        if (deliveryTrackEnabled !== undefined) config.deliveryTrackEnabled = deliveryTrackEnabled;
+        if (trackRoles !== undefined) config.trackRoles = trackRoles;
+        if (trackUsers !== undefined) config.trackUsers = trackUsers;
+        if (deliveryRescheduleEnabled !== undefined) config.deliveryRescheduleEnabled = deliveryRescheduleEnabled;
+        if (rescheduleRoles !== undefined) config.rescheduleRoles = rescheduleRoles;
+        if (rescheduleUsers !== undefined) config.rescheduleUsers = rescheduleUsers;
+        if (deliveryApproveEnabled !== undefined) config.deliveryApproveEnabled = deliveryApproveEnabled;
+        if (approveRejectRoles !== undefined) config.approveRejectRoles = approveRejectRoles;
+        if (approveRejectUsers !== undefined) config.approveRejectUsers = approveRejectUsers;
+        if (deliveryCancelEnabled !== undefined) config.deliveryCancelEnabled = deliveryCancelEnabled;
+        if (cancelRoles !== undefined) config.cancelRoles = cancelRoles;
+        if (cancelUsers !== undefined) config.cancelUsers = cancelUsers;
+        if (deliveryReturnEnabled !== undefined) config.deliveryReturnEnabled = deliveryReturnEnabled;
+        if (returnRoles !== undefined) config.returnRoles = returnRoles;
+        if (returnUsers !== undefined) config.returnUsers = returnUsers;
+        if (deliveryRefundEnabled !== undefined) config.deliveryRefundEnabled = deliveryRefundEnabled;
+        if (refundRoles !== undefined) config.refundRoles = refundRoles;
+        if (refundUsers !== undefined) config.refundUsers = refundUsers;
 
         if (isVatApplicable !== undefined) config.isVatApplicable = isVatApplicable;
         if (vatPercentage !== undefined) config.vatPercentage = vatPercentage;

@@ -468,6 +468,9 @@ const createDeliveryOrder = async (req, res, next) => {
             recipientName,
             recipientPhone,
             deliveryAddress,
+            sourceWarehouse: req.body?.sourceWarehouse || req.body?.source || "Central Kitchen",
+            branch: req.body?.branch || req.user?.branch || "",
+            franchise: req.body?.franchise || req.user?.franchise || "",
             notes: notes || "",
             items: cleanedItems,
             totalAmount,
@@ -481,6 +484,7 @@ const createDeliveryOrder = async (req, res, next) => {
                 notes: "Delivery order entered into system."
             }],
             createdBy: actorName,
+            createdByUserId: req.user?._id || req.user?.id || null,
             updatedBy: actorName
         });
 
@@ -688,6 +692,51 @@ const updateDeliveryStatus = async (req, res, next) => {
             await syncRefundExpense(order, actorName, req.body);
         }
 
+        // DeliGati Internal Dispatch Notifications for status transitions
+        try {
+            const normUpper = String(status || "").toUpperCase().replace(/[\s\/\-]+/g, "_");
+            if (normUpper.includes("READY") || normUpper.includes("APPROV")) {
+                sendDispatchNotification({
+                    event: DISPATCH_EVENTS.ORDER_APPROVED,
+                    order,
+                    actor: req.user
+                }).catch(err => console.error("Notification error on ORDER_APPROVED:", err));
+            } else if (normUpper.includes("CANCEL") || normUpper.includes("REJECT")) {
+                sendDispatchNotification({
+                    event: DISPATCH_EVENTS.ORDER_REJECTED,
+                    order,
+                    actor: req.user,
+                    extra: { reason: order.cancellationReason || finalNotes }
+                }).catch(err => console.error("Notification error on ORDER_REJECTED:", err));
+            } else if (normUpper.includes("TRANSIT") || normUpper.includes("OUT")) {
+                sendDispatchNotification({
+                    event: DISPATCH_EVENTS.DISPATCH_STARTED,
+                    order,
+                    actor: req.user
+                }).catch(err => console.error("Notification error on DISPATCH_STARTED:", err));
+
+                sendDispatchNotification({
+                    event: DISPATCH_EVENTS.IN_TRANSIT,
+                    order,
+                    actor: req.user
+                }).catch(err => console.error("Notification error on IN_TRANSIT:", err));
+            } else if (normUpper.includes("PICK")) {
+                sendDispatchNotification({
+                    event: DISPATCH_EVENTS.PICKED_UP,
+                    order,
+                    actor: req.user
+                }).catch(err => console.error("Notification error on PICKED_UP:", err));
+            } else if (normUpper.includes("DELIVER")) {
+                sendDispatchNotification({
+                    event: DISPATCH_EVENTS.DELIVERED,
+                    order,
+                    actor: req.user
+                }).catch(err => console.error("Notification error on DELIVERED:", err));
+            }
+        } catch (notifErr) {
+            console.error("Error dispatching notification:", notifErr);
+        }
+
         res.status(200).json({
             success: true,
             message: `Order status updated to ${status || order.deliveryStatus}`,
@@ -746,6 +795,14 @@ const assignRider = async (req, res, next) => {
 
         order.updatedBy = actorName;
         await order.save();
+
+        // Dispatch Notification: RIDER_ASSIGNED
+        sendDispatchNotification({
+            event: DISPATCH_EVENTS.RIDER_ASSIGNED,
+            order,
+            actor: req.user,
+            extra: { riderName: staff.name }
+        }).catch(err => console.error("Notification error on RIDER_ASSIGNED:", err));
 
         res.status(200).json({
             success: true,
