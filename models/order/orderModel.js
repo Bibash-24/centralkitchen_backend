@@ -118,6 +118,14 @@ const orderSchema = new mongoose.Schema({
     updatedAt: { type: Date, default: null }
   },
   timeline: [orderTimelineSchema],
+  createdByUserId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "User",
+    default: null,
+    index: true
+  },
+  branch: { type: String, default: "" },
+  franchise: { type: String, default: "" },
   createdBy: {
     type: String,
     default: "Kitchen Staff"

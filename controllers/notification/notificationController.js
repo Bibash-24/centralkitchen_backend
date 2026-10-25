@@ -169,7 +169,50 @@ const getNotifications = async (req, res, next) => {
             await Notification.deleteMany({ type: "inventory" });
         }
         
-        const notifications = await Notification.find({})
+        const RolePermission = require("../../models/superadmin/rolePermissionModel");
+        const companySlug = req.user?.companySlug || req.query.companySlug;
+        const query = {};
+        if (companySlug && req.user?.role?.toLowerCase() !== "superadmin") {
+            query.companySlug = companySlug;
+        }
+
+        const notifications = await Notification.find(query)
+            .sort({ createdAt: -1 });
+
+        const userRole = (req.user?.role || "").trim();
+        const userId = req.user?._id || req.user?.id;
+        
+        // Superadmin is not notified of operational notifications
+        if (userRole.toLowerCase() === "superadmin") {
+            return res.status(200).json({
+                success: true,
+                message: "Notifications retrieved successfully",
+                data: []
+            });
+        }
+
+        const creditRoles = config?.creditOverdueNotifyRoles || ["Admin", "Cashier"];
+        const isCreditAllowed = creditRoles.some(r => r.toLowerCase() === userRole.toLowerCase());
+
+        const chequeRoles = config?.chequeNotifyRoles || ["Admin", "Cashier"];
+        const isChequeAllowed = chequeRoles.some(r => r.toLowerCase() === userRole.toLowerCase());
+
+        const lowStockRoles = config?.lowStockNotifyRoles || ["Admin", "Cashier"];
+        const isLowStockAllowed = lowStockRoles.some(r => r.toLowerCase() === userRole.toLowerCase());
+
+        // Dynamic dispatch & order roles check
+        const dispatchRoles = [
+            "Admin", "Manager", "Company Manager", "Warehouse", "Warehouse Staff",
+            "Dispatch", "Dispatch Staff", "Central Kitchen", "Kitchen Staff",
+            "Importer", "Sales", "Regional", "Regional Manager",
+            "Franchise", "Franchise User", "Franchise Manager"
+        ];
+        const isDispatchRole = dispatchRoles.some(r => r.toLowerCase() === userRole.toLowerCase());
+
+        // Check RBAC permission for deliveries
+        let hasDeliveriesMenu = false;
+        if (companySlug && userRole) {
+            const escapedUserRole = userRole.replace(/[.*+?^${}()|[\]\\]/g, "\\const notifications = await Notification.find({})
             .sort({ createdAt: -1 });
 
         const userRole = req.user?.role || "";
@@ -207,6 +250,63 @@ const getNotifications = async (req, res, next) => {
             success: true,
             message: "Notifications retrieved successfully",
             data: filteredNotifications
+        });");
+            const userPermDoc = await RolePermission.findOne({
+                companySlug,
+                role: { $regex: new RegExp("^" + escapedUserRole + "$", "i") },
+                isDeleted: { $ne: true }
+            });
+            if (userPermDoc) {
+                hasDeliveriesMenu = (userPermDoc.allowedMenus || []).includes("deliveries");
+            }
+        }
+        
+        let filteredNotifications = notifications.filter(n => {
+            if (n.type === "credit") return isCreditAllowed;
+            if (n.type === "cheque") return isChequeAllowed;
+            if (n.type === "inventory") return isLowStockAllowed;
+
+            if (n.type === "dispatch" || n.type === "order" || n.type === "delivery") {
+                // 1. Original Franchise Requester always receives updates on their created order
+                if (n.createdByUserId && userId && String(n.createdByUserId) === String(userId)) {
+                    return true;
+                }
+                // 2. Explicit recipient match
+                if (Array.isArray(n.recipientUserIds) && userId && n.recipientUserIds.some(id => String(id) === String(userId))) {
+                    return true;
+                }
+                // 3. Admin / Manager always authorized
+                if (userRole.toLowerCase() === "admin" || userRole.toLowerCase() === "manager") {
+                    return true;
+                }
+                // 4. Role in allowedRoles or default dispatch roles
+                const notifAllowedRoles = (Array.isArray(n.allowedRoles) && n.allowedRoles.length > 0) ? n.allowedRoles : dispatchRoles;
+                if (notifAllowedRoles.some(r => r.toLowerCase() === userRole.toLowerCase())) {
+                    return true;
+                }
+                // 5. RBAC permission for deliveries module
+                if (hasDeliveriesMenu) {
+                    return true;
+                }
+                return false;
+            }
+
+            return true;
+        });
+
+        // Compute isRead per user using readBy tracker if present
+        const sanitized = filteredNotifications.map(n => {
+            const notifObj = n.toObject ? n.toObject() : { ...n };
+            if (userId && Array.isArray(n.readBy) && n.readBy.some(r => String(r.userId) === String(userId))) {
+                notifObj.isRead = true;
+            }
+            return notifObj;
+        });
+
+        res.status(200).json({
+            success: true,
+            message: "Notifications retrieved successfully",
+            data: sanitized
         });
     } catch (error) {
         next(error);
@@ -222,7 +322,17 @@ const markRead = async (req, res, next) => {
             return next(error);
         }
 
+        const userId = req.user?._id || req.user?.id;
         notification.isRead = !notification.isRead;
+        if (userId) {
+            if (!Array.isArray(notification.readBy)) notification.readBy = [];
+            const idx = notification.readBy.findIndex(r => String(r.userId) === String(userId));
+            if (notification.isRead) {
+                if (idx === -1) notification.readBy.push({ userId, readAt: new Date() });
+            } else {
+                if (idx !== -1) notification.readBy.splice(idx, 1);
+            }
+        }
         await notification.save();
 
         res.status(200).json({
@@ -237,7 +347,15 @@ const markRead = async (req, res, next) => {
 
 const markAllRead = async (req, res, next) => {
     try {
-        await Notification.updateMany({ isRead: false }, { isRead: true });
+        const companySlug = req.user?.companySlug || req.query.companySlug;
+        const filter = (companySlug && req.user?.role !== "Superadmin") ? { companySlug } : {};
+        const userId = req.user?._id || req.user?.id;
+
+        const updateObj = { $set: { isRead: true } };
+        if (userId) {
+            updateObj.$addToSet = { readBy: { userId, readAt: new Date() } };
+        }
+        await Notification.updateMany(filter, updateObj);
 
         res.status(200).json({
             success: true,

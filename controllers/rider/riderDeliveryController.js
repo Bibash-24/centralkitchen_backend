@@ -1,3 +1,4 @@
+const { sendDispatchNotification, DISPATCH_EVENTS } = require("../../services/notification/dispatchNotificationService");
 const Order = require("../../models/order/orderModel");
 const Staff = require("../../models/staff/staffModel");
 const RolePermission = require("../../models/superadmin/rolePermissionModel");
@@ -576,6 +577,40 @@ const updateRiderDeliveryStatus = async (req, res, next) => {
                 success: false,
                 message: "Concurrent update conflict. The delivery status has already been transitioned by another operation."
             });
+        }
+
+        // DeliGati Internal Dispatch Notifications: PICKED_UP, IN_TRANSIT, DISPATCH_STARTED, DELIVERED
+        try {
+            const normTargetUpper = String(normalizedTarget || targetStatus || "").toUpperCase().replace(/[\s\/\-]+/g, "_");
+            const normCanonicalUpper = String(canonicalStatus || "").toUpperCase().replace(/[\s\/\-]+/g, "_");
+
+            if (normTargetUpper.includes("PICK") || normCanonicalUpper.includes("PICK")) {
+                sendDispatchNotification({
+                    event: DISPATCH_EVENTS.PICKED_UP,
+                    order: updatedOrder,
+                    actor: user
+                }).catch(err => console.error("Notification error on PICKED_UP:", err));
+            } else if (normTargetUpper.includes("TRANSIT") || normTargetUpper.includes("OUT") || normCanonicalUpper.includes("TRANSIT") || normCanonicalUpper.includes("OUT")) {
+                sendDispatchNotification({
+                    event: DISPATCH_EVENTS.DISPATCH_STARTED,
+                    order: updatedOrder,
+                    actor: user
+                }).catch(err => console.error("Notification error on DISPATCH_STARTED:", err));
+
+                sendDispatchNotification({
+                    event: DISPATCH_EVENTS.IN_TRANSIT,
+                    order: updatedOrder,
+                    actor: user
+                }).catch(err => console.error("Notification error on IN_TRANSIT:", err));
+            } else if (isCompletingDelivery || normTargetUpper.includes("DELIVER") || normCanonicalUpper.includes("DELIVER")) {
+                sendDispatchNotification({
+                    event: DISPATCH_EVENTS.DELIVERED,
+                    order: updatedOrder,
+                    actor: user
+                }).catch(err => console.error("Notification error on DELIVERED:", err));
+            }
+        } catch (notifErr) {
+            console.error("Error dispatching notification:", notifErr);
         }
 
         res.status(200).json({

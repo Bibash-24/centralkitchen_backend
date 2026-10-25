@@ -1,3 +1,4 @@
+const { sendDispatchNotification, DISPATCH_EVENTS } = require("../../services/notification/dispatchNotificationService");
 const mongoose = require("mongoose");
 const Order = require("../../models/order/orderModel");
 const Counter = require("../../models/counter/counterModel");
@@ -485,6 +486,13 @@ const createDeliveryOrder = async (req, res, next) => {
 
         await newOrder.save();
         await syncOrderToCreditor(newOrder, actorName);
+
+        // DeliGati Internal Dispatch Notification: NEW_ORDER
+        sendDispatchNotification({
+            event: DISPATCH_EVENTS.NEW_ORDER,
+            order: newOrder,
+            actor: req.user
+        }).catch(err => console.error("Notification error on NEW_ORDER:", err));
 
         res.status(201).json({
             success: true,
