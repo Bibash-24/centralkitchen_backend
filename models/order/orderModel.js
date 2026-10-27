@@ -10,7 +10,8 @@ const orderItemSchema = new mongoose.Schema({
   quantity: { type: Number, required: true, min: 1 },
   price: { type: Number, required: true, min: 0 },
   portion: { type: String, default: "" },
-  notes: { type: String, default: "" }
+  notes: { type: String, default: "" },
+  deliveredQuantity: { type: Number, default: null }
 }, { _id: false });
 
 const orderTimelineSchema = new mongoose.Schema({
@@ -19,6 +20,7 @@ const orderTimelineSchema = new mongoose.Schema({
   timestamp: { type: Date, default: Date.now },
   user: { type: String, default: "System" },
   notes: { type: String, default: "" },
+  signature: { type: String, default: "" },
   location: {
     latitude: { type: Number, default: null },
     longitude: { type: Number, default: null },
@@ -86,6 +88,7 @@ const orderSchema = new mongoose.Schema({
   receiverConfirmation: {
     receiverName: { type: String, default: "" },
     receiverPhone: { type: String, default: "" },
+    signature: { type: String, default: "" },
     notes: { type: String, default: "" },
     confirmedAt: { type: Date, default: null }
   },

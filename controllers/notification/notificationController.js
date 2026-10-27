@@ -279,12 +279,30 @@ const getNotifications = async (req, res, next) => {
             return true;
         });
 
-        // Compute isRead per user using readBy tracker
+        // Dynamic tenant prefix resolution for order number ticker
+        const getCompanyPrefix = (slug) => {
+            if (!slug || typeof slug !== "string") return "DSP";
+            const parts = slug.split(/[-_]+/).filter(Boolean);
+            const initials = parts.map(part => part.charAt(0).toUpperCase()).join("");
+            return initials || "DSP";
+        };
+        const dynamicPrefix = config?.orderNoPrefix || config?.orderPrefix || config?.prefix || getCompanyPrefix(targetSlug);
+
+        // Compute isRead per user using readBy tracker & enforce dynamic tenant ticker
         const sanitized = filteredNotifications.map(n => {
             const notifObj = n.toObject ? n.toObject() : { ...n };
             if (userId && Array.isArray(n.readBy) && n.readBy.some(r => String(r.userId) === String(userId))) {
                 notifObj.isRead = true;
             }
+
+            // Dynamically ensure order number ticker matches tenant prefix
+            if (dynamicPrefix && targetSlug && targetSlug.toLowerCase() !== "central-kitchen" && targetSlug.toLowerCase() !== "ck") {
+                const tickerRegex = /\b(?:CK|DSP)-(\d+)\b/g;
+                if (notifObj.title) notifObj.title = notifObj.title.replace(tickerRegex, dynamicPrefix + "-$1");
+                if (notifObj.message) notifObj.message = notifObj.message.replace(tickerRegex, dynamicPrefix + "-$1");
+                if (notifObj.orderNo) notifObj.orderNo = notifObj.orderNo.replace(tickerRegex, dynamicPrefix + "-$1");
+            }
+
             return notifObj;
         });
 

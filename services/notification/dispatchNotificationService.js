@@ -2,6 +2,28 @@ const mongoose = require("mongoose");
 const Notification = require("../../models/notification/notificationModel");
 const RestaurantConfig = require("../../models/restaurant/restaurantModel");
 
+const getCompanyPrefix = (slug) => {
+    if (!slug || typeof slug !== "string") return "DSP";
+    const parts = slug.split(/[-_]+/).filter(Boolean);
+    const initials = parts.map(part => part.charAt(0).toUpperCase()).join("");
+    return initials || "DSP";
+};
+
+const formatOrderNo = (orderNo, slug) => {
+    if (!orderNo) return "";
+    const str = String(orderNo).trim();
+    const prefix = getCompanyPrefix(slug);
+    if (str.includes("-")) {
+        const parts = str.split("-");
+        const numPart = parts[parts.length - 1];
+        if (prefix && (parts[0].toUpperCase() === "CK" || parts[0].toUpperCase() === "DSP") && prefix !== parts[0].toUpperCase() && slug && slug.toLowerCase() !== "central-kitchen" && slug.toLowerCase() !== "ck") {
+            return `${prefix}-${numPart}`;
+        }
+        return str;
+    }
+    return `${prefix}-${str.padStart(4, "0")}`;
+};
+
 const DISPATCH_EVENTS = {
     NEW_ORDER: "NEW_ORDER",
     ORDER_APPROVED: "ORDER_APPROVED",
@@ -10,18 +32,31 @@ const DISPATCH_EVENTS = {
     DISPATCH_STARTED: "DISPATCH_STARTED",
     PICKED_UP: "PICKED_UP",
     IN_TRANSIT: "IN_TRANSIT",
+    ARRIVED: "ARRIVED",
+    PENDING_RECEIVER_CONFIRMATION: "PENDING_RECEIVER_CONFIRMATION",
     DELIVERED: "DELIVERED"
 };
+
+// Streamlined Notification Model: Only essential bookend alerts + exception alerts
+const ALLOWED_DISPATCH_NOTIFICATIONS = new Set([
+    DISPATCH_EVENTS.NEW_ORDER,
+    DISPATCH_EVENTS.DELIVERED,
+    DISPATCH_EVENTS.ORDER_REJECTED
+]);
 
 /**
  * Build professional, contextual title and message for each dispatch event
  */
 const buildNotificationContent = (event, order, extra = {}) => {
-    const orderNo = order.orderNo || "Order";
+    const effectiveSlug = order.companySlug || extra.companySlug;
+    const orderNo = formatOrderNo(order.orderNo, effectiveSlug) || "Order";
     const doNumber = order.doNumber ? " (DO: " + order.doNumber + ")" : "";
     const customer = order.recipientName || "Customer";
     const destination = order.deliveryAddress || "Destination";
-    const source = order.sourceWarehouse || "Central Kitchen";
+    const defaultWarehouse = effectiveSlug
+        ? `${effectiveSlug.split(/[-_]+/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ")} Warehouse`
+        : "Main Warehouse";
+    const source = order.sourceWarehouse || defaultWarehouse;
     const riderName = order.rider?.name || extra.riderName || "Rider";
 
     switch (event) {
@@ -69,11 +104,23 @@ const buildNotificationContent = (event, order, extra = {}) => {
                 message: "Order " + orderNo + doNumber + " is now in transit towards " + destination + " with rider " + riderName + "."
             };
 
+                case DISPATCH_EVENTS.ARRIVED:
+        case "PENDING_RECEIVER_CONFIRMATION":
+        case DISPATCH_EVENTS.PENDING_RECEIVER_CONFIRMATION: {
+            const franchiseLabel = order.franchise ? " (" + order.franchise + ")" : (order.branch ? " (" + order.branch + ")" : "");
+            return {
+                title: "Rider Arrived: " + orderNo,
+                message: "Rider " + riderName + " has arrived at " + destination + franchiseLabel + " for " + (order.doNumber ? "DO: " + order.doNumber : "order " + orderNo) + ". Awaiting receiver confirmation."
+            };
+        }
+
         case DISPATCH_EVENTS.DELIVERED: {
-            const receiver = order.receiverConfirmation?.receiverName || "Customer";
+            const atDestination = destination ? " at " + destination : "";
+            const hasSig = Boolean(order.receiverConfirmation?.signature);
+            const sigText = hasSig ? " with verified digital signature confirmation" : "";
             return {
                 title: "Order Delivered: " + orderNo,
-                message: "Order " + orderNo + doNumber + " has been successfully delivered to " + receiver + " at " + destination + "."
+                message: "Order " + orderNo + doNumber + " has been successfully delivered" + atDestination + sigText + "."
             };
         }
 
@@ -99,6 +146,21 @@ const buildNotificationContent = (event, order, extra = {}) => {
 const sendDispatchNotification = async ({ event, order, actor, extra = {} }) => {
     try {
         if (!order || !order._id || !event) return null;
+
+                // Enforce streamlined dispatch notifications: Only NEW_ORDER, DELIVERED, and ORDER_REJECTED
+        if (!ALLOWED_DISPATCH_NOTIFICATIONS.has(event)) {
+            return null;
+        }
+
+        // Strict guard against premature DELIVERED notification:
+        // An order cannot trigger a DELIVERED alert if its status is Out for Delivery or anything other than Delivered
+        if (event === DISPATCH_EVENTS.DELIVERED) {
+            const currentStatusNorm = String(order.deliveryStatus || order.status || "").toUpperCase().replace(/[\s\/\-]+/g, "_");
+            if (currentStatusNorm.includes("OUT_FOR_DELIVERY") || currentStatusNorm !== "DELIVERED") {
+                console.warn(`[CRITICAL GUARD] Blocked false DELIVERED notification for order ${order.orderNo} with status: "${order.deliveryStatus}"`);
+                return null;
+            }
+        }
 
         const rawCompanySlug = order.companySlug || actor?.companySlug || "";
         const companySlug = String(rawCompanySlug).trim();
@@ -152,11 +214,86 @@ const sendDispatchNotification = async ({ event, order, actor, extra = {} }) => 
             });
         }
 
-        // Dynamic roles sourced directly from Delivery Setup
+                // Step 5: Role-based arrival recipients
+        const isArrivalEvent = event === DISPATCH_EVENTS.ARRIVED ||
+                               event === "ARRIVED" ||
+                               event === "PENDING_RECEIVER_CONFIRMATION" ||
+                               event === DISPATCH_EVENTS.PENDING_RECEIVER_CONFIRMATION;
+
+        // Potential recipients for arrival notification:
+        // Franchise users, Franchise manager, Salesperson, Regional staff, Dispatch staff, Warehouse staff, Manager, Admin
+        const arrivalRecipientRoles = [
+            "franchise", "franchise manager", "franchise user",
+            "sales", "salesperson", "sales person",
+            "regional", "regional staff", "regional manager",
+            "dispatch", "dispatch staff", "dispatch manager",
+            "warehouse", "warehouse staff", "central kitchen",
+            "manager", "company manager", "admin"
+        ];
+
+        if (isArrivalEvent) {
+            try {
+                const User = require("../../models/user/userModel");
+                const potentialUsers = await User.find({
+                    companySlug: escapedCompanyRegex,
+                    isDeleted: { $ne: true }
+                }).select("_id role franchise branch name email");
+
+                potentialUsers.forEach(u => {
+                    const uRoleLower = String(u.role || "").toLowerCase().trim();
+                    const matchesRole = arrivalRecipientRoles.some(r => uRoleLower.includes(r));
+                    const matchesFranchise = (order.franchise && u.franchise && String(u.franchise).toLowerCase() === String(order.franchise).toLowerCase()) ||
+                                            (order.branch && u.branch && String(u.branch).toLowerCase() === String(order.branch).toLowerCase());
+
+                    if (matchesRole || matchesFranchise) {
+                        if (!recipientUserIds.some(existing => String(existing) === String(u._id))) {
+                            recipientUserIds.push(new mongoose.Types.ObjectId(u._id));
+                        }
+                    }
+                });
+            } catch (userQueryErr) {
+                console.error("Error resolving arrival recipient users:", userQueryErr);
+            }
+        }
+
+        // Dynamic roles sourced directly from Delivery Setup and RBAC
+        let rbacDeliveryRoles = [];
+        try {
+            const RolePermission = require("../../models/superadmin/rolePermissionModel");
+            const rbacDocs = await RolePermission.find({
+                companySlug: escapedCompanyRegex,
+                allowedMenus: "deliveries",
+                isDeleted: { $ne: true }
+            }).select("role");
+            rbacDeliveryRoles = rbacDocs.map(d => d.role).filter(Boolean);
+        } catch (e) {
+            console.error("Error querying RBAC delivery roles:", e);
+        }
+
         const configuredSetupRoles = (config && (config.notifyRoles || config.deliveryNotifyRoles)) || [];
-        const allowedRoles = Array.isArray(configuredSetupRoles) && configuredSetupRoles.length > 0
-            ? configuredSetupRoles
-            : ["Admin", "Manager"]; // Administrative default
+        const allowedRoles = Array.from(new Set([
+            "Admin",
+            "Superadmin",
+            ...configuredSetupRoles,
+            ...rbacDeliveryRoles
+        ]));
+
+        // Add all users having Admin or RBAC-enabled delivery roles in this company
+        try {
+            const User = require("../../models/user/userModel");
+            const rbacUsers = await User.find({
+                companySlug: escapedCompanyRegex,
+                role: { $in: allowedRoles.map(r => new RegExp("^" + r.trim() + "$", "i")) },
+                isDeleted: { $ne: true }
+            }).select("_id");
+            rbacUsers.forEach(u => {
+                if (!recipientUserIds.some(existing => String(existing) === String(u._id))) {
+                    recipientUserIds.push(new mongoose.Types.ObjectId(u._id));
+                }
+            });
+        } catch (uErr) {
+            console.error("Error adding RBAC users to notification recipients:", uErr);
+        }
 
         const notificationData = {
             companySlug,
@@ -166,9 +303,9 @@ const sendDispatchNotification = async ({ event, order, actor, extra = {} }) => 
             message: content.message,
             targetId: String(order._id),
             orderId: order._id,
-            orderNo: order.orderNo || "",
+            orderNo: formatOrderNo(order.orderNo, companySlug) || "",
             doNumber: order.doNumber || "",
-            source: order.sourceWarehouse || "Central Kitchen",
+            source: order.sourceWarehouse || (companySlug ? `${companySlug.split(/[-_]+/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ")} Warehouse` : "Main Warehouse"),
             destination: order.deliveryAddress || "",
             branch: order.branch || "",
             franchise: order.franchise || "",

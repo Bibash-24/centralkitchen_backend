@@ -1,6 +1,7 @@
 const { sendDispatchNotification, DISPATCH_EVENTS } = require("../../services/notification/dispatchNotificationService");
 const mongoose = require("mongoose");
 const Order = require("../../models/order/orderModel");
+const Company = require("../../models/company/companyModel");
 const Counter = require("../../models/counter/counterModel");
 const Staff = require("../../models/staff/staffModel");
 const Inventory = require("../../models/inventory/inventoryModel");
@@ -429,18 +430,28 @@ const createDeliveryOrder = async (req, res, next) => {
 
         const companySlug = req.body?.companySlug || req.query?.companySlug || req.user?.companySlug || req.companySlug ;
 
-        // Get guaranteed unique orderNo sequence using global orderNo counter
+        // Dynamic company prefix resolution
+        const getCompanyPrefix = (slug) => {
+            if (!slug || typeof slug !== "string") return "CK";
+            const parts = slug.split(/[-_]+/).filter(Boolean);
+            const initials = parts.map(part => part.charAt(0).toUpperCase()).join("");
+            return initials || "CK";
+        };
+        const companyPrefix = getCompanyPrefix(companySlug);
+
+        // Get guaranteed unique orderNo sequence per company/tenant
         let orderNo = req.body?.orderNo;
         if (!orderNo || (await Order.findOne({ orderNo }))) {
             let isUnique = false;
+            const counterSlug = companySlug || "global";
             while (!isUnique) {
                 const counter = await Counter.findByIdAndUpdate(
-                    { _id: { companySlug: "global", seqName: "orderNo" } },
+                    { _id: { companySlug: counterSlug, seqName: "orderNo" } },
                     { $inc: { seq: 1 } },
                     { new: true, upsert: true }
                 );
 
-                const candidate = `CK-${String(counter.seq).padStart(4, "0")}`;
+                const candidate = `${companyPrefix}-${String(counter.seq).padStart(4, "0")}`;
                 const existing = await Order.findOne({ orderNo: candidate });
                 if (!existing) {
                     orderNo = candidate;
@@ -468,7 +479,7 @@ const createDeliveryOrder = async (req, res, next) => {
             recipientName,
             recipientPhone,
             deliveryAddress,
-            sourceWarehouse: req.body?.sourceWarehouse || req.body?.source || "Central Kitchen",
+            sourceWarehouse: req.body?.sourceWarehouse || req.body?.source || (companySlug ? `${companySlug.split(/[-_]+/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ")} Warehouse` : "Main Warehouse"),
             branch: req.body?.branch || req.user?.branch || "",
             franchise: req.body?.franchise || req.user?.franchise || "",
             notes: notes || "",
@@ -585,7 +596,7 @@ const updateDeliveryStatus = async (req, res, next) => {
         const status = targetStatus;
         const { notes } = req.body;
 
-        const validStatuses = ["Created", "Preparing", "Ready for Dispatch", "Out for Delivery", "Delivered", "Cancelled", "PENDING_APPROVAL", "APPROVED", "REJECTED", "RETURN_INITIATED", "Returned"];
+        const validStatuses = ["Created", "ARRIVED", "PENDING_RECEIVER_CONFIRMATION", "Preparing", "Ready for Dispatch", "Out for Delivery", "Delivered", "Cancelled", "PENDING_APPROVAL", "APPROVED", "REJECTED", "RETURN_INITIATED", "Returned"];
         let isStatusAllowed = validStatuses.includes(status);
         if (status && !isStatusAllowed) {
             const existsInDropdown = await DropdownOption.findOne({
@@ -616,9 +627,25 @@ const updateDeliveryStatus = async (req, res, next) => {
                     message: `Order status is locked (${prevStatus}) and cannot be modified.`
                 });
             }
-            order.deliveryStatus = status;
+                        // Step 5: Handle Rider Arrival at Destination
+            if (status === "ARRIVED" || status === "PENDING_RECEIVER_CONFIRMATION") {
+                // When rider marks ARRIVED: IN_TRANSIT -> ARRIVED -> PENDING_RECEIVER_CONFIRMATION
+                // The delivery must NOT automatically become DELIVERED.
+                order.deliveryStatus = status;
+            } else {
+                order.deliveryStatus = status;
+            }
             if (status === "Delivered") {
                 order.paymentStatus = "Paid";
+                if (req.body.receiverName || req.body.signature) {
+                    order.receiverConfirmation = {
+                        receiverName: req.body.receiverName ? String(req.body.receiverName).trim() : (order.recipientName || ""),
+                        receiverPhone: req.body.receiverPhone ? String(req.body.receiverPhone).trim() : (order.recipientPhone || ""),
+                        signature: req.body.signature ? String(req.body.signature).trim() : "",
+                        notes: req.body.notes ? String(req.body.notes).trim() : "",
+                        confirmedAt: new Date()
+                    };
+                }
             }
             if ((status === "Cancelled" || status === "CANCELLED") && prevStatus !== "Cancelled" && prevStatus !== "CANCELLED") {
                 const actor = req.user ? (req.user.name || req.user.username) : "Kitchen Staff";
@@ -666,6 +693,9 @@ const updateDeliveryStatus = async (req, res, next) => {
             user: actorName,
             notes: finalNotes || ""
         };
+        if (req.body.signature) {
+            newTimelineEvent.signature = String(req.body.signature).trim();
+        }
         if (req.body.location && (req.body.location.latitude !== undefined || req.body.location.longitude !== undefined)) {
             newTimelineEvent.location = {
                 latitude: Number(req.body.location.latitude),
@@ -682,7 +712,9 @@ const updateDeliveryStatus = async (req, res, next) => {
                 updatedAt: new Date()
             };
         }
-        order.timeline.push(newTimelineEvent);
+        if (status !== "ARRIVED" && status !== "PENDING_RECEIVER_CONFIRMATION") {
+            order.timeline.push(newTimelineEvent);
+        }
 
         order.updatedBy = actorName;
         await order.save();
@@ -692,41 +724,19 @@ const updateDeliveryStatus = async (req, res, next) => {
             await syncRefundExpense(order, actorName, req.body);
         }
 
-        // DeliGati Internal Dispatch Notifications for status transitions
+        // DeliGati Internal Dispatch Notifications for status transitions (Only ORDER_REJECTED & DELIVERED)
         try {
             const normUpper = String(status || "").toUpperCase().replace(/[\s\/\-]+/g, "_");
-            if (normUpper.includes("READY") || normUpper.includes("APPROV")) {
-                sendDispatchNotification({
-                    event: DISPATCH_EVENTS.ORDER_APPROVED,
-                    order,
-                    actor: req.user
-                }).catch(err => console.error("Notification error on ORDER_APPROVED:", err));
-            } else if (normUpper.includes("CANCEL") || normUpper.includes("REJECT")) {
+            const isDeliveredStatus = (normUpper === "DELIVERED" || status === "Delivered") && !normUpper.includes("OUT_FOR_DELIVERY");
+
+            if (normUpper.includes("CANCEL") || normUpper.includes("REJECT")) {
                 sendDispatchNotification({
                     event: DISPATCH_EVENTS.ORDER_REJECTED,
                     order,
                     actor: req.user,
                     extra: { reason: order.cancellationReason || finalNotes }
                 }).catch(err => console.error("Notification error on ORDER_REJECTED:", err));
-            } else if (normUpper.includes("TRANSIT") || normUpper.includes("OUT")) {
-                sendDispatchNotification({
-                    event: DISPATCH_EVENTS.DISPATCH_STARTED,
-                    order,
-                    actor: req.user
-                }).catch(err => console.error("Notification error on DISPATCH_STARTED:", err));
-
-                sendDispatchNotification({
-                    event: DISPATCH_EVENTS.IN_TRANSIT,
-                    order,
-                    actor: req.user
-                }).catch(err => console.error("Notification error on IN_TRANSIT:", err));
-            } else if (normUpper.includes("PICK")) {
-                sendDispatchNotification({
-                    event: DISPATCH_EVENTS.PICKED_UP,
-                    order,
-                    actor: req.user
-                }).catch(err => console.error("Notification error on PICKED_UP:", err));
-            } else if (normUpper.includes("DELIVER")) {
+            } else if (isDeliveredStatus) {
                 sendDispatchNotification({
                     event: DISPATCH_EVENTS.DELIVERED,
                     order,
@@ -757,9 +767,10 @@ const assignRider = async (req, res, next) => {
         if (!order || order.isDeleted) {
             return res.status(404).json({ success: false, message: "Delivery order not found" });
         }
-        const nonModifiableRider = ["OUT_FOR_DELIVERY", "Out for Delivery", "DELIVERED", "Delivered", "CANCELLED", "Cancelled"];
-        if (nonModifiableRider.includes(order.deliveryStatus)) {
-            return res.status(400).json({ success: false, message: "Rider assignment cannot be modified for Out for Delivery, Delivered, or Cancelled orders." });
+        const normStatus = String(order.deliveryStatus || "").toUpperCase().replace(/[\s\/-]+/g, "_");
+        const allowedStatuses = ["PENDING_APPROVAL", "CREATED", "APPROVED", "PREPARING", "READY_FOR_DISPATCH", "ASSIGNED"];
+        if (!allowedStatuses.includes(normStatus)) {
+            return res.status(400).json({ success: false, message: "Rider assignment can only be added or changed when order status is up to Ready for Dispatch." });
         }
 
         const staff = await Staff.findById(staffId);
@@ -796,13 +807,7 @@ const assignRider = async (req, res, next) => {
         order.updatedBy = actorName;
         await order.save();
 
-        // Dispatch Notification: RIDER_ASSIGNED
-        sendDispatchNotification({
-            event: DISPATCH_EVENTS.RIDER_ASSIGNED,
-            order,
-            actor: req.user,
-            extra: { riderName: staff.name }
-        }).catch(err => console.error("Notification error on RIDER_ASSIGNED:", err));
+        // RIDER_ASSIGNED notification muted per streamlined notification policy
 
         res.status(200).json({
             success: true,

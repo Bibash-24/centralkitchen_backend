@@ -15,8 +15,8 @@ const VALID_STATUS_TRANSITIONS = {
     // Deliveries & Dispatch canonical lifecycle
     "Ready for Dispatch": ["Out for Delivery", "Delivered"],
     READY_FOR_DISPATCH: ["Out for Delivery", "Delivered"],
-    "Out for Delivery": ["Delivered"],
-    OUT_FOR_DELIVERY: ["Delivered"],
+    "Out for Delivery": ["ARRIVED", "PENDING_RECEIVER_CONFIRMATION", "Delivered"],
+    OUT_FOR_DELIVERY: ["ARRIVED", "PENDING_RECEIVER_CONFIRMATION", "Delivered"],
     Delivered: [],
     DELIVERED: [],
     Cancelled: [],
@@ -28,7 +28,7 @@ const VALID_STATUS_TRANSITIONS = {
     ASSIGNED: ["Ready for Dispatch", "Out for Delivery", "READY"],
     READY: ["Ready for Dispatch", "Out for Delivery", "PICKED_UP"],
     PICKED_UP: ["Out for Delivery", "IN_TRANSIT"],
-    IN_TRANSIT: ["Out for Delivery", "ARRIVED", "Delivered"],
+    IN_TRANSIT: ["ARRIVED", "PENDING_RECEIVER_CONFIRMATION", "Out for Delivery", "Delivered"],
     ARRIVED: ["PENDING_RECEIVER_CONFIRMATION", "Out for Delivery", "Delivered"],
     PENDING_RECEIVER_CONFIRMATION: ["Delivered", "DELIVERED"],
     Created: ["Ready for Dispatch", "Out for Delivery"],
@@ -45,7 +45,13 @@ const normalizeDeliveryStatus = (status) => {
     if (["Ready for Dispatch", "READY_FOR_DISPATCH", "ASSIGNED", "READY", "RIDER_ASSIGNED"].includes(s)) {
         return "Ready for Dispatch";
     }
-    if (["Out for Delivery", "OUT_FOR_DELIVERY", "IN_TRANSIT", "PICKED_UP", "ARRIVED", "PENDING_RECEIVER_CONFIRMATION"].includes(s)) {
+    if (["ARRIVED", "Arrived", "ARRIVED_AT_DESTINATION"].includes(s)) {
+        return "ARRIVED";
+    }
+    if (["PENDING_RECEIVER_CONFIRMATION", "Pending Receiver Confirmation"].includes(s)) {
+        return "PENDING_RECEIVER_CONFIRMATION";
+    }
+    if (["Out for Delivery", "OUT_FOR_DELIVERY", "IN_TRANSIT", "PICKED_UP"].includes(s)) {
         return "Out for Delivery";
     }
     if (["Delivered", "DELIVERED"].includes(s)) {
@@ -184,6 +190,7 @@ const sanitizeRiderDelivery = (orderDoc) => {
             receiverName: o.receiverConfirmation.receiverName,
             receiverPhone: o.receiverConfirmation.receiverPhone || "",
             notes: o.receiverConfirmation.notes || "",
+            signature: o.receiverConfirmation.signature || "",
             confirmedAt: o.receiverConfirmation.confirmedAt || null
         } : null,
         lastLocation: o.lastLocation || null,
@@ -454,7 +461,9 @@ const updateRiderDeliveryStatus = async (req, res, next) => {
         }
 
         // 5. Idempotent check for intermediate non-terminal states
-        if (currentPersistedStatus === targetStatus || (normalizedCurrent === normalizedTarget && normalizedCurrent !== "Delivered")) {
+        const normCurrentExact = String(currentPersistedStatus).trim().toUpperCase().replace(/[\s\-_]+/g, '_');
+        const normTargetExact = String(targetStatus).trim().toUpperCase().replace(/[\s\-_]+/g, '_');
+        if (currentPersistedStatus === targetStatus || normCurrentExact === normTargetExact) {
             return res.status(200).json({
                 success: true,
                 message: `Delivery is already in status ${targetStatus}.`,
@@ -508,12 +517,24 @@ const updateRiderDeliveryStatus = async (req, res, next) => {
 
         const actorName = user.name || user.username || "Rider";
 
+                // Step 5: Check if rider is marking arrival at destination
+        const isMarkingArrival = targetStatus === "ARRIVED" ||
+                                normalizedTarget === "ARRIVED" ||
+                                targetStatus === "PENDING_RECEIVER_CONFIRMATION" ||
+                                normalizedTarget === "PENDING_RECEIVER_CONFIRMATION";
+
         // Store canonical status matching Deliveries & Dispatch
-        const canonicalStatus = (normalizedTarget === "Delivered")
+        // When rider marks ARRIVED: IN_TRANSIT -> ARRIVED -> PENDING_RECEIVER_CONFIRMATION
+        // The delivery must NOT automatically become DELIVERED.
+        const canonicalStatus = isCompletingDelivery
             ? "Delivered"
-            : (normalizedTarget === "Out for Delivery")
-                ? "Out for Delivery"
-                : targetStatus;
+            : (targetStatus === "ARRIVED" || normalizedTarget === "ARRIVED")
+                ? "ARRIVED"
+                : (targetStatus === "PENDING_RECEIVER_CONFIRMATION" || normalizedTarget === "PENDING_RECEIVER_CONFIRMATION")
+                    ? "PENDING_RECEIVER_CONFIRMATION"
+                    : (normalizedTarget === "Out for Delivery")
+                        ? "Out for Delivery"
+                        : targetStatus;
 
         const setFields = {
             deliveryStatus: canonicalStatus,
@@ -536,6 +557,7 @@ const updateRiderDeliveryStatus = async (req, res, next) => {
                 receiverName: String(receiverName || req.body.confirmedBy).trim(),
                 receiverPhone: receiverPhone ? String(receiverPhone).trim() : (order.recipientPhone || ""),
                 notes: notes ? String(notes).trim() : "",
+                signature: req.body.signature ? String(req.body.signature).trim() : "",
                 confirmedAt: new Date()
             };
             if (order.paymentMethod === "Cash on Delivery" && order.paymentStatus === "Pending") {
@@ -543,13 +565,19 @@ const updateRiderDeliveryStatus = async (req, res, next) => {
             }
         }
 
+        const isDeliveredCanonical = canonicalStatus === "Delivered" || canonicalStatus === "DELIVERED";
+        const defaultTransitionNote = (isCompletingDelivery || isDeliveredCanonical) ? "" : `Status transitioned from ${currentPersistedStatus} to ${canonicalStatus}`;
         const internalTimelineEvent = {
             action: `Rider Status Transition: ${canonicalStatus}`,
             status: canonicalStatus,
             timestamp: new Date(),
             user: actorName,
-            notes: notes ? `Notes: ${notes}` : `Status transitioned from ${currentPersistedStatus} to ${canonicalStatus}`
+            notes: notes ? `Notes: ${notes}` : defaultTransitionNote
         };
+
+        if (req.body.signature) {
+            internalTimelineEvent.signature = String(req.body.signature).trim();
+        }
 
         if (location && (location.latitude !== undefined || location.longitude !== undefined)) {
             internalTimelineEvent.location = {
@@ -561,12 +589,17 @@ const updateRiderDeliveryStatus = async (req, res, next) => {
             };
         }
 
+        const isArrivedEvent = canonicalStatus === "ARRIVED" || String(canonicalStatus).toUpperCase().includes("ARRIVED");
+        const updateOps = {
+            $set: setFields
+        };
+        if (!isArrivedEvent) {
+            updateOps.$push = { timeline: internalTimelineEvent };
+        }
+
         const updatedOrder = await Order.findOneAndUpdate(
             atomicFilter,
-            {
-                $set: setFields,
-                $push: { timeline: internalTimelineEvent }
-            },
+            updateOps,
             { new: true }
         );
 
@@ -579,30 +612,13 @@ const updateRiderDeliveryStatus = async (req, res, next) => {
             });
         }
 
-        // DeliGati Internal Dispatch Notifications: PICKED_UP, IN_TRANSIT, DISPATCH_STARTED, DELIVERED
+        // DeliGati Internal Dispatch Notifications: DELIVERED only (intermediate status transitions muted)
         try {
             const normTargetUpper = String(normalizedTarget || targetStatus || "").toUpperCase().replace(/[\s\/\-]+/g, "_");
             const normCanonicalUpper = String(canonicalStatus || "").toUpperCase().replace(/[\s\/\-]+/g, "_");
 
-            if (normTargetUpper.includes("PICK") || normCanonicalUpper.includes("PICK")) {
-                sendDispatchNotification({
-                    event: DISPATCH_EVENTS.PICKED_UP,
-                    order: updatedOrder,
-                    actor: user
-                }).catch(err => console.error("Notification error on PICKED_UP:", err));
-            } else if (normTargetUpper.includes("TRANSIT") || normTargetUpper.includes("OUT") || normCanonicalUpper.includes("TRANSIT") || normCanonicalUpper.includes("OUT")) {
-                sendDispatchNotification({
-                    event: DISPATCH_EVENTS.DISPATCH_STARTED,
-                    order: updatedOrder,
-                    actor: user
-                }).catch(err => console.error("Notification error on DISPATCH_STARTED:", err));
-
-                sendDispatchNotification({
-                    event: DISPATCH_EVENTS.IN_TRANSIT,
-                    order: updatedOrder,
-                    actor: user
-                }).catch(err => console.error("Notification error on IN_TRANSIT:", err));
-            } else if (isCompletingDelivery || normTargetUpper.includes("DELIVER") || normCanonicalUpper.includes("DELIVER")) {
+            const isDeliveredTarget = isCompletingDelivery || (canonicalStatus === "Delivered" || canonicalStatus === "DELIVERED");
+            if (isDeliveredTarget) {
                 sendDispatchNotification({
                     event: DISPATCH_EVENTS.DELIVERED,
                     order: updatedOrder,
