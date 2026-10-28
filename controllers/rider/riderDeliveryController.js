@@ -1,5 +1,7 @@
 const { applyDeliveryAudit, syncBatchDeliveryAudit } = require("../../services/delivery/deliveryAuditService");
 const { sendDispatchNotification, DISPATCH_EVENTS } = require("../../services/notification/dispatchNotificationService");
+const { deductDeliveryOrderInventory } = require("../../services/delivery/deliveryInventoryService");
+const Issue = require("../../models/issue/issueModel");
 const Order = require("../../models/order/orderModel");
 const Staff = require("../../models/staff/staffModel");
 const RolePermission = require("../../models/superadmin/rolePermissionModel");
@@ -411,7 +413,19 @@ const updateRiderDeliveryStatus = async (req, res, next) => {
     try {
         const user = req.user;
         const { id } = req.params;
-        const { status: targetStatus, notes, receiverName, receiverPhone, location } = req.body || {};
+        const {
+            status: targetStatus,
+            notes,
+            receiverName,
+            receiverPhone,
+            location,
+            receiverUser,
+            franchise,
+            itemsConfirmed,
+            hasDiscrepancy,
+            discrepancyType,
+            discrepancyNotes
+        } = req.body || {};
 
         if (!targetStatus || !String(targetStatus).trim()) {
             return res.status(400).json({ success: false, message: "Target delivery status is required." });
@@ -513,6 +527,18 @@ const updateRiderDeliveryStatus = async (req, res, next) => {
                     message: "Receiver confirmation full name is mandatory before delivery completion."
                 });
             }
+
+            // Step 7: Mandatory Remarks rule if discrepancy or quality issue is reported
+            const hasDisc = Boolean(hasDiscrepancy || req.body.hasDiscrepancy || (discrepancyType && discrepancyType !== "No Discrepancy" && discrepancyType !== "none"));
+            if (hasDisc) {
+                const remarks = String(discrepancyNotes || req.body.discrepancyNotes || notes || "").trim();
+                if (!remarks) {
+                    return res.status(400).json({
+                        success: false,
+                        message: "Remarks are mandatory when physical goods discrepancy or quality issues are reported."
+                    });
+                }
+            }
         }
 
         // 8. Atomic Concurrency Update using findOneAndUpdate
@@ -567,12 +593,20 @@ const updateRiderDeliveryStatus = async (req, res, next) => {
         }
 
         if (isCompletingDelivery) {
+            const hasDisc = Boolean(hasDiscrepancy || req.body.hasDiscrepancy || (discrepancyType && discrepancyType !== "No Discrepancy" && discrepancyType !== "none"));
             setFields.receiverConfirmation = {
+                receiverUser: String(receiverUser || req.body.receiverUser || user.email || user.name || "").trim(),
                 receiverName: String(receiverName || req.body.confirmedBy).trim(),
                 receiverPhone: receiverPhone ? String(receiverPhone).trim() : (order.recipientPhone || ""),
-                notes: notes ? String(notes).trim() : "",
+                franchise: String(franchise || req.body.franchise || order.recipientName || "").trim(),
                 signature: req.body.signature ? String(req.body.signature).trim() : "",
-                confirmedAt: new Date()
+                notes: notes ? String(notes).trim() : "",
+                confirmedAt: new Date(),
+                itemsConfirmed: Array.isArray(itemsConfirmed) ? itemsConfirmed : (Array.isArray(req.body.itemsConfirmed) ? req.body.itemsConfirmed : []),
+                hasDiscrepancy: hasDisc,
+                discrepancyType: hasDisc ? String(discrepancyType || req.body.discrepancyType || "Quantity discrepancy").trim() : "",
+                discrepancyNotes: hasDisc ? String(discrepancyNotes || req.body.discrepancyNotes || notes || "").trim() : "",
+                issueId: null
             };
             if (order.paymentMethod === "Cash on Delivery" && order.paymentStatus === "Pending") {
                 setFields.paymentStatus = "Paid";
@@ -629,6 +663,52 @@ const updateRiderDeliveryStatus = async (req, res, next) => {
             await syncBatchDeliveryAudit(updatedOrder, Order);
         } catch (batchErr) {
             console.error("Batch delivery duration sync failed:", batchErr);
+        }
+
+        // Step 7: Inventory Completion (Deduct delivered quantity using existing Inventory system)
+        const isDeliveredTarget = isCompletingDelivery || (canonicalStatus === "Delivered" || canonicalStatus === "DELIVERED");
+        if (isDeliveredTarget) {
+            try {
+                await deductDeliveryOrderInventory(updatedOrder, actorName);
+            } catch (invErr) {
+                console.error("Inventory deduction failed on delivery completion:", invErr);
+            }
+
+            // Step 7: Discrepancy & Issue Creation (DeliGati Issues module integration)
+            if (updatedOrder.receiverConfirmation && updatedOrder.receiverConfirmation.hasDiscrepancy) {
+                try {
+                    const discType = updatedOrder.receiverConfirmation.discrepancyType || "Delivery Discrepancy";
+                    const discNotes = updatedOrder.receiverConfirmation.discrepancyNotes || updatedOrder.receiverConfirmation.notes || "Discrepancy reported during delivery handover";
+                    const doNum = updatedOrder.doNumber || `DO-${updatedOrder.orderNo}`;
+                    
+                    let itemSummary = "";
+                    if (Array.isArray(updatedOrder.receiverConfirmation.itemsConfirmed) && updatedOrder.receiverConfirmation.itemsConfirmed.length > 0) {
+                        itemSummary = updatedOrder.receiverConfirmation.itemsConfirmed
+                            .map(i => `- ${i.name}: Ordered ${i.orderedQuantity}, Received ${i.receivedQuantity} (Diff: ${i.discrepancy || (Number(i.receivedQuantity) - Number(i.orderedQuantity))})`)
+                            .join("\n");
+                    }
+
+                    const newIssue = new Issue({
+                        title: `Delivery Discrepancy: Order #${updatedOrder.orderNo} (${discType})`,
+                        category: "Delivery Discrepancy",
+                        priority: "High",
+                        description: `Franchise/Outlet: ${updatedOrder.receiverConfirmation.franchise || updatedOrder.recipientName || 'Franchise'}\nDO: ${doNum}\nDiscrepancy Type: ${discType}\nReceiver: ${updatedOrder.receiverConfirmation.receiverName} (${updatedOrder.receiverConfirmation.receiverPhone || 'N/A'})\nDiscrepancy Remarks:\n${discNotes}\n\nItem Checklist Breakdown:\n${itemSummary || 'Refer to DO for item details.'}`,
+                        deliveryOrderId: updatedOrder._id,
+                        doNumber: doNum,
+                        status: "Pending",
+                        reportedBy: user._id,
+                        reporterName: actorName,
+                        reporterEmail: user.email || user.phone || "",
+                        reporterRole: user.role || "Rider",
+                        restaurantName: updatedOrder.companySlug || "Central Kitchen"
+                    });
+                    await newIssue.save();
+                    updatedOrder.receiverConfirmation.issueId = newIssue._id;
+                    await updatedOrder.save();
+                } catch (issueErr) {
+                    console.error("Failed to auto-create delivery discrepancy issue:", issueErr);
+                }
+            }
         }
 
         // DeliGati Internal Dispatch Notifications: DELIVERED only (intermediate status transitions muted)

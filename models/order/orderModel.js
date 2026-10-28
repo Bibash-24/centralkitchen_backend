@@ -122,12 +122,33 @@ const orderSchema = new mongoose.Schema({
   deliveryBatch: { type: String, default: "" },
   sourceWarehouse: { type: String, default: "" },
   receiverConfirmation: {
+    receiverUser: { type: String, default: "" },
     receiverName: { type: String, default: "" },
     receiverPhone: { type: String, default: "" },
+    franchise: { type: String, default: "" },
     signature: { type: String, default: "" },
     notes: { type: String, default: "" },
-    confirmedAt: { type: Date, default: null }
+    confirmedAt: { type: Date, default: null },
+    itemsConfirmed: [
+      {
+        menuItemId: { type: String },
+        name: { type: String },
+        orderedQuantity: { type: Number, default: 1 },
+        receivedQuantity: { type: Number, default: 1 },
+        discrepancy: { type: Number, default: 0 }
+      }
+    ],
+    hasDiscrepancy: { type: Boolean, default: false },
+    discrepancyType: { type: String, default: "" },
+    discrepancyNotes: { type: String, default: "" },
+    issueId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Issue",
+      default: null
+    }
   },
+  inventoryDeducted: { type: Boolean, default: false },
+  inventoryDeductedAt: { type: Date, default: null },
   cancellationReason: { type: String, default: "" },
   returnReason: { type: String, default: "" },
   returnType: { type: String, default: "" },

@@ -2,6 +2,8 @@ const { applyDeliveryAudit, syncBatchDeliveryAudit } = require("../../services/d
 const { sendDispatchNotification, DISPATCH_EVENTS } = require("../../services/notification/dispatchNotificationService");
 const mongoose = require("mongoose");
 const Order = require("../../models/order/orderModel");
+const Issue = require("../../models/issue/issueModel");
+const { deductDeliveryOrderInventory } = require("../../services/delivery/deliveryInventoryService");
 const Company = require("../../models/company/companyModel");
 const Counter = require("../../models/counter/counterModel");
 const Staff = require("../../models/staff/staffModel");
@@ -640,13 +642,57 @@ const updateDeliveryStatus = async (req, res, next) => {
                 order.paymentStatus = "Paid";
                 if (req.body.receiverName || req.body.signature) {
                     order.receiverConfirmation = {
+                        receiverUser: req.body.receiverUser || (req.user ? (req.user.email || req.user.name) : ""),
                         receiverName: req.body.receiverName ? String(req.body.receiverName).trim() : (order.recipientName || ""),
                         receiverPhone: req.body.receiverPhone ? String(req.body.receiverPhone).trim() : (order.recipientPhone || ""),
+                        franchise: req.body.franchise || order.recipientName || "",
                         signature: req.body.signature ? String(req.body.signature).trim() : "",
                         notes: req.body.notes ? String(req.body.notes).trim() : "",
-                        confirmedAt: new Date()
+                        confirmedAt: new Date(),
+                        itemsConfirmed: Array.isArray(req.body.itemsConfirmed) ? req.body.itemsConfirmed : [],
+                        hasDiscrepancy: Boolean(req.body.hasDiscrepancy),
+                        discrepancyType: req.body.discrepancyType || "",
+                        discrepancyNotes: req.body.discrepancyNotes || "",
+                        issueId: null
                     };
+
+                    // Step 7: Auto-create claim in DeliGati Issues module if discrepancy flagged
+                    if (order.receiverConfirmation.hasDiscrepancy) {
+                        try {
+                            const discType = order.receiverConfirmation.discrepancyType || "Delivery Discrepancy";
+                            const discNotes = order.receiverConfirmation.discrepancyNotes || order.receiverConfirmation.notes || "Discrepancy reported during delivery handover";
+                            const doNum = order.doNumber || `DO-${order.orderNo}`;
+
+                            let itemSummary = "";
+                            if (Array.isArray(order.receiverConfirmation.itemsConfirmed) && order.receiverConfirmation.itemsConfirmed.length > 0) {
+                                itemSummary = order.receiverConfirmation.itemsConfirmed
+                                    .map(i => `- ${i.name}: Ordered ${i.orderedQuantity}, Received ${i.receivedQuantity} (Diff: ${i.discrepancy || (Number(i.receivedQuantity) - Number(i.orderedQuantity))})`)
+                                    .join("\n");
+                            }
+
+                            const newIssue = new Issue({
+                                title: `Delivery Discrepancy: Order #${order.orderNo} (${discType})`,
+                                category: "Delivery Discrepancy",
+                                priority: "High",
+                                description: `Franchise/Outlet: ${order.receiverConfirmation.franchise || order.recipientName || 'Franchise'}\nDO: ${doNum}\nDiscrepancy Type: ${discType}\nReceiver: ${order.receiverConfirmation.receiverName} (${order.receiverConfirmation.receiverPhone || 'N/A'})\nDiscrepancy Remarks:\n${discNotes}\n\nItem Checklist Breakdown:\n${itemSummary || 'Refer to DO for item details.'}`,
+                                deliveryOrderId: order._id,
+                                doNumber: doNum,
+                                status: "Pending",
+                                reportedBy: req.user ? req.user._id : order._id,
+                                reporterName: req.user ? (req.user.name || req.user.username) : "Authorized Receiver",
+                                reporterEmail: req.user ? (req.user.email || req.user.phone) : "",
+                                reporterRole: req.user ? req.user.role : "Staff",
+                                restaurantName: order.companySlug || "Central Kitchen"
+                            });
+                            await newIssue.save();
+                            order.receiverConfirmation.issueId = newIssue._id;
+                        } catch (issueErr) {
+                            console.error("Discrepancy issue creation failed in orderController:", issueErr);
+                        }
+                    }
                 }
+                const actor = req.user ? (req.user.name || req.user.username) : "Kitchen Staff";
+                await deductDeliveryOrderInventory(order, actor);
             }
             if ((status === "Cancelled" || status === "CANCELLED") && prevStatus !== "Cancelled" && prevStatus !== "CANCELLED") {
                 const actor = req.user ? (req.user.name || req.user.username) : "Kitchen Staff";
@@ -659,6 +705,7 @@ const updateDeliveryStatus = async (req, res, next) => {
                 order.cancelledBy = req.body.cancelledBy || actor;
                 order.cancelledTimestamp = req.body.cancelledTimestamp || new Date();
                 order.paymentStatus = "Cancelled";
+                order.inventoryDeducted = false;
             }
             if (status === "RETURN_INITIATED") {
                 const actor = req.user ? (req.user.name || req.user.username) : "Kitchen Staff";
@@ -676,6 +723,7 @@ const updateDeliveryStatus = async (req, res, next) => {
                     await restockCancelledOrderItems(order, actor, "Order Return Restock");
                 }
                 order.paymentStatus = "Refunded";
+                order.inventoryDeducted = false;
                 if (req.body.returnReason) order.returnReason = req.body.returnReason;
                 if (req.body.returnType || req.body.refundMethod) order.returnType = req.body.returnType || req.body.refundMethod;
                 if (req.body.returnNotes || req.body.refundNotes) order.returnNotes = req.body.refundNotes || req.body.returnNotes;

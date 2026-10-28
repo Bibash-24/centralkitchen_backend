@@ -8,7 +8,7 @@ const issueSchema = new mongoose.Schema({
     },
     category: {
         type: String,
-        enum: ["Bug / Technical Error", "UI / Display Issue", "Performance / Speed", "Billing / License", "Feature Request", "Other"],
+        enum: ["Bug / Technical Error", "UI / Display Issue", "Performance / Speed", "Billing / License", "Feature Request", "Delivery Discrepancy", "Other"],
         default: "Bug / Technical Error"
     },
     priority: {
@@ -50,6 +50,15 @@ const issueSchema = new mongoose.Schema({
     restaurantName: {
         type: String,
         default: "Chiya Town POS"
+    },
+    deliveryOrderId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Order",
+        default: null
+    },
+    doNumber: {
+        type: String,
+        default: ""
     }
 }, {
     timestamps: true
