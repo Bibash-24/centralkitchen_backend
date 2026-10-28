@@ -1,3 +1,4 @@
+const { applyDeliveryAudit, syncBatchDeliveryAudit } = require("../../services/delivery/deliveryAuditService");
 const { sendDispatchNotification, DISPATCH_EVENTS } = require("../../services/notification/dispatchNotificationService");
 const Order = require("../../models/order/orderModel");
 const Staff = require("../../models/staff/staffModel");
@@ -194,6 +195,19 @@ const sanitizeRiderDelivery = (orderDoc) => {
             confirmedAt: o.receiverConfirmation.confirmedAt || null
         } : null,
         lastLocation: o.lastLocation || null,
+        dispatchTimestamp: o.dispatchTimestamp || null,
+        arrivalTimestamp: o.arrivalTimestamp || null,
+        completionTimestamp: o.completionTimestamp || null,
+        deliveryDurationSeconds: o.deliveryDurationSeconds || null,
+        deliveryDurationFormatted: o.deliveryDurationFormatted || "",
+        dispatchLocation: o.dispatchLocation || null,
+        arrivalLocation: o.arrivalLocation || null,
+        completionLocation: o.completionLocation || null,
+        batchStartTime: o.batchStartTime || null,
+        batchCompletionTime: o.batchCompletionTime || null,
+        batchTotalDurationSeconds: o.batchTotalDurationSeconds || null,
+        batchTotalDurationFormatted: o.batchTotalDurationFormatted || "",
+        isBatchCompleted: o.isBatchCompleted || false,
         allowedTransitions
     };
 };
@@ -567,35 +581,33 @@ const updateRiderDeliveryStatus = async (req, res, next) => {
 
         const isDeliveredCanonical = canonicalStatus === "Delivered" || canonicalStatus === "DELIVERED";
         const defaultTransitionNote = (isCompletingDelivery || isDeliveredCanonical) ? "" : `Status transitioned from ${currentPersistedStatus} to ${canonicalStatus}`;
-        const internalTimelineEvent = {
-            action: `Rider Status Transition: ${canonicalStatus}`,
-            status: canonicalStatus,
-            timestamp: new Date(),
-            user: actorName,
+
+        // Step 6: Apply Automatic GPS Capture, Raw Event Timestamps, and Calculate Travel Duration
+        const internalTimelineEvent = applyDeliveryAudit({
+            order,
+            targetStatus: canonicalStatus,
+            actorName,
+            location,
+            signature: req.body.signature,
             notes: notes ? `Notes: ${notes}` : defaultTransitionNote
-        };
+        });
 
-        if (req.body.signature) {
-            internalTimelineEvent.signature = String(req.body.signature).trim();
-        }
+        // Enrich setFields with calculated duration, timestamps, and event locations
+        setFields.dispatchTimestamp = order.dispatchTimestamp || null;
+        setFields.arrivalTimestamp = order.arrivalTimestamp || null;
+        setFields.completionTimestamp = order.completionTimestamp || null;
+        setFields.deliveryDurationSeconds = order.deliveryDurationSeconds || null;
+        setFields.deliveryDurationFormatted = order.deliveryDurationFormatted || "";
+        if (order.dispatchLocation) setFields.dispatchLocation = order.dispatchLocation;
+        if (order.arrivalLocation) setFields.arrivalLocation = order.arrivalLocation;
+        if (order.completionLocation) setFields.completionLocation = order.completionLocation;
+        if (order.batchStartTime) setFields.batchStartTime = order.batchStartTime;
+        if (order.lastLocation) setFields.lastLocation = order.lastLocation;
 
-        if (location && (location.latitude !== undefined || location.longitude !== undefined)) {
-            internalTimelineEvent.location = {
-                latitude: Number(location.latitude),
-                longitude: Number(location.longitude),
-                accuracy: location.accuracy != null ? Number(location.accuracy) : null,
-                address: location.address ? String(location.address) : "",
-                timestamp: location.timestamp ? new Date(location.timestamp) : new Date()
-            };
-        }
-
-        const isArrivedEvent = canonicalStatus === "ARRIVED" || String(canonicalStatus).toUpperCase().includes("ARRIVED");
         const updateOps = {
-            $set: setFields
+            $set: setFields,
+            $push: { timeline: internalTimelineEvent }
         };
-        if (!isArrivedEvent) {
-            updateOps.$push = { timeline: internalTimelineEvent };
-        }
 
         const updatedOrder = await Order.findOneAndUpdate(
             atomicFilter,
@@ -610,6 +622,13 @@ const updateRiderDeliveryStatus = async (req, res, next) => {
                 success: false,
                 message: "Concurrent update conflict. The delivery status has already been transitioned by another operation."
             });
+        }
+
+        // Step 6: Batch delivery duration synchronization (preserves individual timings)
+        try {
+            await syncBatchDeliveryAudit(updatedOrder, Order);
+        } catch (batchErr) {
+            console.error("Batch delivery duration sync failed:", batchErr);
         }
 
         // DeliGati Internal Dispatch Notifications: DELIVERED only (intermediate status transitions muted)

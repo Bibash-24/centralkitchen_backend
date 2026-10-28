@@ -1,7 +1,7 @@
 const { isVerifiedUser } = require("../../middlewares/tokenVerification");
 const express = require("express");
 const router = express.Router();
-const { createDeliveryOrder, getDeliveryOrders, updateDeliveryStatus, assignRider, updateDeliveryOrder, deleteDeliveryOrder } = require("../../controllers/order/orderController");
+const { createDeliveryOrder, getDeliveryOrders, updateDeliveryStatus, assignRider, updateDeliveryOrder, deleteDeliveryOrder, updateOrderPaymentReceived } = require("../../controllers/order/orderController");
 
 /**
  * @swagger
@@ -323,5 +323,6 @@ router.delete("/:id", isVerifiedUser, deleteDeliveryOrder);
 router.get("/", isVerifiedUser, getDeliveryOrders);
 router.patch("/:id/status", isVerifiedUser, updateDeliveryStatus);
 router.patch("/:id/assign-rider", isVerifiedUser, assignRider);
+router.patch("/:id/payment-received", isVerifiedUser, updateOrderPaymentReceived);
 
 module.exports = router;

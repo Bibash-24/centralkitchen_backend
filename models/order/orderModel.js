@@ -17,10 +17,21 @@ const orderItemSchema = new mongoose.Schema({
 const orderTimelineSchema = new mongoose.Schema({
   action: { type: String, required: true },
   status: { type: String, required: true },
+  eventType: { type: String, default: "" },
   timestamp: { type: Date, default: Date.now },
   user: { type: String, default: "System" },
   notes: { type: String, default: "" },
   signature: { type: String, default: "" },
+  companySlug: { type: String, default: "" },
+  orderId: { type: mongoose.Schema.Types.ObjectId, ref: "Order", default: null },
+  orderNo: { type: String, default: "" },
+  doNumber: { type: String, default: "" },
+  deliveryBatch: { type: String, default: "" },
+  rider: {
+    staffId: { type: mongoose.Schema.Types.ObjectId, ref: "Staff", default: null },
+    name: { type: String, default: "" },
+    phone: { type: String, default: "" }
+  },
   location: {
     latitude: { type: Number, default: null },
     longitude: { type: Number, default: null },
@@ -74,8 +85,33 @@ const orderSchema = new mongoose.Schema({
   },
   paymentStatus: {
     type: String,
-    enum: ["Pending", "Paid", "Partially Paid", "Cancelled", "Refunded"],
+    enum: ["Pending", "Paid", "Partially Paid", "Cancelled", "Refunded", "Credit", "Unpaid"],
     default: "Pending"
+  },
+  paymentReceived: {
+    type: Boolean,
+    default: false
+  },
+  paymentReceivedAt: {
+    type: Date,
+    default: null
+  },
+  paymentReceivedBy: {
+    type: String,
+    default: ""
+  },
+  paymentNotes: {
+    type: String,
+    default: ""
+  },
+  addedToCreditorAt: {
+    type: Date,
+    default: null
+  },
+  creditorId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Creditor",
+    default: null
   },
   deliveryStatus: {
     type: String,
@@ -120,6 +156,42 @@ const orderSchema = new mongoose.Schema({
     address: { type: String, default: "" },
     updatedAt: { type: Date, default: null }
   },
+  // Step 6: GPS & Travel-Time Efficiency Audit
+  dispatchTimestamp: { type: Date, default: null },
+  arrivalTimestamp: { type: Date, default: null },
+  completionTimestamp: { type: Date, default: null },
+
+  deliveryDurationSeconds: { type: Number, default: null },
+  deliveryDurationFormatted: { type: String, default: "" },
+
+  dispatchLocation: {
+    latitude: { type: Number, default: null },
+    longitude: { type: Number, default: null },
+    accuracy: { type: Number, default: null },
+    address: { type: String, default: "" },
+    timestamp: { type: Date, default: null }
+  },
+  arrivalLocation: {
+    latitude: { type: Number, default: null },
+    longitude: { type: Number, default: null },
+    accuracy: { type: Number, default: null },
+    address: { type: String, default: "" },
+    timestamp: { type: Date, default: null }
+  },
+  completionLocation: {
+    latitude: { type: Number, default: null },
+    longitude: { type: Number, default: null },
+    accuracy: { type: Number, default: null },
+    address: { type: String, default: "" },
+    timestamp: { type: Date, default: null }
+  },
+
+  // Batch Delivery Metrics
+  batchStartTime: { type: Date, default: null },
+  batchCompletionTime: { type: Date, default: null },
+  batchTotalDurationSeconds: { type: Number, default: null },
+  batchTotalDurationFormatted: { type: String, default: "" },
+  isBatchCompleted: { type: Boolean, default: false },
   timeline: [orderTimelineSchema],
   createdByUserId: {
     type: mongoose.Schema.Types.ObjectId,

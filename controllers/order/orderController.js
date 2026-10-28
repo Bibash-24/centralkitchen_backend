@@ -1,3 +1,4 @@
+const { applyDeliveryAudit, syncBatchDeliveryAudit } = require("../../services/delivery/deliveryAuditService");
 const { sendDispatchNotification, DISPATCH_EVENTS } = require("../../services/notification/dispatchNotificationService");
 const mongoose = require("mongoose");
 const Order = require("../../models/order/orderModel");
@@ -684,40 +685,28 @@ const updateDeliveryStatus = async (req, res, next) => {
         }
 
         const actorName = req.user ? (req.user.name || req.user.username) : "Kitchen Staff";
-
         const finalNotes = notes || (status === "Cancelled" ? (req.body.cancellationReason || req.body.cancelReason || "") : "");
-        const newTimelineEvent = {
-            action: `Status changed to ${status || 'Updated'}`,
-            status: status || order.deliveryStatus,
-            timestamp: new Date(),
-            user: actorName,
+
+        // Step 6: Apply Automatic GPS Capture, Raw Event Timestamps, and Calculate Travel Duration
+        const newTimelineEvent = applyDeliveryAudit({
+            order,
+            targetStatus: status || order.deliveryStatus,
+            actorName,
+            location: req.body.location,
+            signature: req.body.signature,
             notes: finalNotes || ""
-        };
-        if (req.body.signature) {
-            newTimelineEvent.signature = String(req.body.signature).trim();
-        }
-        if (req.body.location && (req.body.location.latitude !== undefined || req.body.location.longitude !== undefined)) {
-            newTimelineEvent.location = {
-                latitude: Number(req.body.location.latitude),
-                longitude: Number(req.body.location.longitude),
-                accuracy: req.body.location.accuracy != null ? Number(req.body.location.accuracy) : null,
-                address: req.body.location.address ? String(req.body.location.address) : "",
-                timestamp: req.body.location.timestamp ? new Date(req.body.location.timestamp) : new Date()
-            };
-            order.lastLocation = {
-                latitude: Number(req.body.location.latitude),
-                longitude: Number(req.body.location.longitude),
-                accuracy: req.body.location.accuracy != null ? Number(req.body.location.accuracy) : null,
-                address: req.body.location.address ? String(req.body.location.address) : "",
-                updatedAt: new Date()
-            };
-        }
-        if (status !== "ARRIVED" && status !== "PENDING_RECEIVER_CONFIRMATION") {
-            order.timeline.push(newTimelineEvent);
-        }
+        });
+        order.timeline.push(newTimelineEvent);
 
         order.updatedBy = actorName;
         await order.save();
+
+        // Step 6: Synchronize batch total duration if this order belongs to a batch
+        try {
+            await syncBatchDeliveryAudit(order, Order);
+        } catch (batchErr) {
+            console.error("Batch delivery duration sync failed:", batchErr);
+        }
 
         if (status === "Returned") {
             await syncRefundToCreditor(order, actorName, req.body);
@@ -957,11 +946,202 @@ const deleteDeliveryOrder = async (req, res, next) => {
     }
 };
 
+
+/**
+ * Update Delivery Payment Received status (for completed Cash / QR delivery orders)
+ * If received === true:
+ *   - Marks paymentStatus = "Paid", paymentReceived = true, records timestamp and actor.
+ *   - If previously added to Creditor Ledger, settles / records payment in Creditor creditHistory and reduces balance.
+ * If received === false (Payment Not Received):
+ *   - Marks paymentStatus = "Credit", paymentReceived = false, addedToCreditorAt = now.
+ *   - Adds outstanding totalAmount to recipient's Creditor Ledger (matching by phone/name in tenant, or creating a new Creditor profile).
+ */
+const updateOrderPaymentReceived = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        const targetSlug = req.body.companySlug || req.headers["x-company-slug"] || req.user?.companySlug;
+        const actorName = req.user?.name || req.user?.email || req.body.user || "System";
+        const { received, note, remarks } = req.body;
+        const auditNote = String(note || remarks || "").trim();
+
+        const filter = { _id: id, isDeleted: { $ne: true } };
+        if (targetSlug && targetSlug !== "all") {
+            filter.companySlug = targetSlug;
+        }
+
+        const order = await Order.findOne(filter);
+        if (!order) {
+            return res.status(404).json({
+                success: false,
+                message: "Delivery order not found."
+            });
+        }
+
+        const isDelivered = String(order.deliveryStatus || "").toLowerCase() === "delivered";
+        if (!isDelivered) {
+            return res.status(400).json({
+                success: false,
+                message: "Payment receipt can only be confirmed or defined after the delivery is completed."
+            });
+        }
+
+        const orderAmount = Number(order.totalAmount || order.total || 0);
+
+        // Find matched creditor if exists
+        const phoneClean = order.recipientPhone ? String(order.recipientPhone).trim() : "";
+        const nameClean = order.recipientName ? String(order.recipientName).trim() : "";
+        const creditorFilter = {
+            isDeleted: { $ne: true },
+            $or: [
+                { companySlug: order.companySlug },
+                { companySlug: { $exists: false } },
+                { companySlug: null }
+            ]
+        };
+
+        let creditor = null;
+        if (order.creditorId) {
+            creditor = await Creditor.findById(order.creditorId);
+        }
+        if (!creditor && phoneClean) {
+            creditor = await Creditor.findOne({
+                ...creditorFilter,
+                phone: { $regex: new RegExp("^" + escapeRegex(phoneClean) + "$", "i") }
+            });
+        }
+        if (!creditor && nameClean) {
+            creditor = await Creditor.findOne({
+                ...creditorFilter,
+                name: { $regex: new RegExp("^" + escapeRegex(nameClean) + "$", "i") }
+            });
+        }
+
+        if (received) {
+            // Case 1: Payment Received
+            order.paymentReceived = true;
+            order.paymentStatus = "Paid";
+            order.paymentReceivedAt = new Date();
+            order.paymentReceivedBy = actorName;
+            order.paymentNotes = auditNote;
+
+            // If it was previously added to Creditor Ledger, settle the credit balance
+            if (creditor && order.addedToCreditorAt && orderAmount > 0) {
+                if (!Array.isArray(creditor.creditHistory)) creditor.creditHistory = [];
+                creditor.creditHistory.push({
+                    type: "payment",
+                    amount: orderAmount,
+                    orderId: order._id,
+                    orderNo: order.orderNo,
+                    note: auditNote ? `Settlement: Cash/QR Payment Received for Order #${order.orderNo} (${auditNote})` : `Settlement: Cash/QR Payment Received for Delivered Order #${order.orderNo}`,
+                    timestamp: new Date()
+                });
+                creditor.currentBalance = Math.max(0, Number(((Number(creditor.currentBalance) || 0) - orderAmount).toFixed(2)));
+                creditor.updatedBy = actorName;
+                creditor.updatedOn = new Date();
+                await creditor.save();
+            }
+            order.addedToCreditorAt = null;
+
+            if (!Array.isArray(order.timeline)) order.timeline = [];
+            order.timeline.push({
+                action: "Payment Received",
+                status: order.deliveryStatus,
+                eventType: "PAYMENT_RECEIVED",
+                timestamp: new Date(),
+                user: actorName,
+                companySlug: order.companySlug || "",
+                orderId: order._id,
+                orderNo: order.orderNo,
+                notes: auditNote ? `Cash/QR payment of Rs. ${orderAmount.toLocaleString("en-IN")} confirmed as received. Note: ${auditNote}` : `Cash/QR payment of Rs. ${orderAmount.toLocaleString("en-IN")} confirmed as received.`
+            });
+        } else {
+            // Case 2: Payment NOT Received -> Add to Creditor Ledger
+            order.paymentReceived = false;
+            order.paymentStatus = "Credit";
+            order.addedToCreditorAt = new Date();
+            order.paymentReceivedBy = actorName;
+            order.paymentNotes = auditNote;
+
+            if (orderAmount > 0) {
+                if (creditor) {
+                    if (!Array.isArray(creditor.creditHistory)) creditor.creditHistory = [];
+                    const alreadyCredited = creditor.creditHistory.some(
+                        h => h.orderId && String(h.orderId) === String(order._id) && h.type === "credit"
+                    );
+                    if (!alreadyCredited) {
+                        creditor.creditHistory.push({
+                            type: "credit",
+                            amount: orderAmount,
+                            orderId: order._id,
+                            orderNo: order.orderNo,
+                            note: auditNote ? `Delivered Cash/QR Payment Not Received for Order #${order.orderNo} - Booked to Credit (${auditNote})` : `Delivered Cash/QR Payment Not Received for Order #${order.orderNo} - Booked to Credit`,
+                            timestamp: new Date()
+                        });
+                        creditor.currentBalance = Number(((Number(creditor.currentBalance) || 0) + orderAmount).toFixed(2));
+                        creditor.updatedBy = actorName;
+                        creditor.updatedOn = new Date();
+                        await creditor.save();
+                    }
+                    order.creditorId = creditor._id;
+                } else {
+                    // Create new Creditor profile for this customer
+                    const newCreditor = new Creditor({
+                        companySlug: order.companySlug,
+                        name: order.recipientName || "Delivery Customer",
+                        phone: phoneClean || "9800000000",
+                        address: order.deliveryAddress || "Kathmandu",
+                        creditLimit: 10000,
+                        currentBalance: orderAmount,
+                        creditHistory: [{
+                            type: "credit",
+                            amount: orderAmount,
+                            orderId: order._id,
+                            orderNo: order.orderNo,
+                            note: auditNote ? `Delivered Cash/QR Payment Not Received for Order #${order.orderNo} - Booked to Credit (${auditNote})` : `Delivered Cash/QR Payment Not Received for Order #${order.orderNo} - Booked to Credit`,
+                            timestamp: new Date()
+                        }],
+                        createdBy: actorName,
+                        createdOn: new Date()
+                    });
+                    await newCreditor.save();
+                    order.creditorId = newCreditor._id;
+                }
+            }
+
+            if (!Array.isArray(order.timeline)) order.timeline = [];
+            order.timeline.push({
+                action: "Payment Not Received (Creditor Ledger)",
+                status: order.deliveryStatus,
+                eventType: "PAYMENT_NOT_RECEIVED",
+                timestamp: new Date(),
+                user: actorName,
+                companySlug: order.companySlug || "",
+                orderId: order._id,
+                orderNo: order.orderNo,
+                notes: auditNote ? `Cash/QR payment of Rs. ${orderAmount.toLocaleString("en-IN")} not received upon delivery handover. Added to Creditor Ledger. Note: ${auditNote}` : `Cash/QR payment of Rs. ${orderAmount.toLocaleString("en-IN")} not received upon delivery handover. Added to Creditor Ledger.`
+            });
+        }
+
+        await order.save();
+
+        res.status(200).json({
+            success: true,
+            message: received
+                ? "Payment marked as received successfully."
+                : "Payment marked as not received and added to Creditor Ledger successfully.",
+            data: order
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
 module.exports = {
     createDeliveryOrder,
     getDeliveryOrders,
     updateDeliveryStatus,
     assignRider,
     updateDeliveryOrder,
-    deleteDeliveryOrder
+    deleteDeliveryOrder,
+    updateOrderPaymentReceived
 };
