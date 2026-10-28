@@ -215,6 +215,36 @@ const { createCompany, getCompanies, getCompanyBySlug, updateCompany, deleteComp
  *                   $ref: '#/components/schemas/Company'
  *       404:
  *         description: Company tenant not found
+ * 
+ *   delete:
+ *     summary: Soft delete incorporated company tenant (Superadmin only)
+ *     tags: [Company Management]
+ *     security:
+ *       - cookieAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: slug
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Unique company slug tag
+ *         example: fresh-bites
+ *     responses:
+ *       200:
+ *         description: Company tenant deactivated/deleted successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Company deactivated successfully!
+ *       404:
+ *         description: Company tenant not found
  */
 
 router.post("/", createCompany);

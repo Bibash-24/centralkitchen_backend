@@ -113,6 +113,44 @@ router.put("/read-all", isVerifiedUser, markAllRead);
  *         description: Unauthorized
  *       404:
  *         description: Notification not found
+ * 
+ *   patch:
+ *     summary: Toggle read/unread status for a specific notification (PATCH alias)
+ *     tags: [Notifications]
+ *     security:
+ *       - cookieAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Status updated successfully
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: Notification not found
+ * 
+ *   post:
+ *     summary: Toggle read/unread status for a specific notification (POST alias)
+ *     tags: [Notifications]
+ *     security:
+ *       - cookieAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Status updated successfully
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: Notification not found
  */
 router.put("/:id/read", isVerifiedUser, markRead);
 router.patch("/:id/read", isVerifiedUser, markRead);

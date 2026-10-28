@@ -317,6 +317,159 @@ const { createDeliveryOrder, getDeliveryOrders, updateDeliveryStatus, assignRide
  *         description: Order or Staff member not found
  */
 
+/**
+ * @swagger
+ * /api/orders/{id}:
+ *   put:
+ *     summary: Update an existing delivery order details
+ *     tags: [Delivery Orders]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Delivery Order MongoDB ObjectId
+ *         example: 64e21a8f9b1c2d3e4f5a6b7c
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               recipientName:
+ *                 type: string
+ *                 example: Ram Shrestha
+ *               recipientPhone:
+ *                 type: string
+ *                 example: "9801234567"
+ *               deliveryAddress:
+ *                 type: string
+ *                 example: Thamel, Ward 26, Kathmandu
+ *               notes:
+ *                 type: string
+ *                 example: Fragile package, handle with care
+ *               vehicleNo:
+ *                 type: string
+ *                 example: BA 2 PA 1234
+ *               paymentMethod:
+ *                 type: string
+ *                 example: Cash on Delivery
+ *               items:
+ *                 type: array
+ *                 items:
+ *                   $ref: '#/components/schemas/OrderItem'
+ *     responses:
+ *       200:
+ *         description: Delivery order updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Delivery order updated successfully.
+ *                 data:
+ *                   $ref: '#/components/schemas/DeliveryOrder'
+ *       400:
+ *         description: Invalid order update payload or order locked
+ *       404:
+ *         description: Delivery order not found
+ * 
+ *   delete:
+ *     summary: Soft delete a delivery order
+ *     tags: [Delivery Orders]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Delivery Order MongoDB ObjectId
+ *         example: 64e21a8f9b1c2d3e4f5a6b7c
+ *     responses:
+ *       200:
+ *         description: Delivery order deleted successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Delivery order deleted successfully.
+ *       400:
+ *         description: Delivered order cannot be deleted
+ *       404:
+ *         description: Delivery order not found
+ */
+
+/**
+ * @swagger
+ * /api/orders/{id}/payment-received:
+ *   patch:
+ *     summary: Verify Cash / QR delivery payment receipt or add to Creditor Ledger (Step 6)
+ *     description: Defines whether cash or QR payment was received upon delivery completion. If received is false, automatically books the order amount to the recipient's Creditor Ledger. If subsequently marked as received, automatically settles the creditor balance.
+ *     tags: [Delivery Orders]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Delivery Order MongoDB ObjectId
+ *         example: 64e21a8f9b1c2d3e4f5a6b7c
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - received
+ *             properties:
+ *               received:
+ *                 type: boolean
+ *                 description: true if payment received in full, false if customer didn't pay (adds to Creditor Ledger)
+ *                 example: true
+ *               note:
+ *                 type: string
+ *                 description: Audit remarks or transaction reference
+ *                 example: Fonepay Ref #TXN98412
+ *               companySlug:
+ *                 type: string
+ *                 description: Tenant company slug
+ *                 example: fresh-bites
+ *     responses:
+ *       200:
+ *         description: Payment receipt verification status updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Payment marked as received successfully.
+ *                 data:
+ *                   $ref: '#/components/schemas/DeliveryOrder'
+ *       400:
+ *         description: Order delivery is not yet completed
+ *       404:
+ *         description: Delivery order not found
+ */
+
 router.post("/", isVerifiedUser, createDeliveryOrder);
 router.put("/:id", isVerifiedUser, updateDeliveryOrder);
 router.delete("/:id", isVerifiedUser, deleteDeliveryOrder);
