@@ -29,7 +29,7 @@ const deductDeliveryOrderInventory = async (order, actorName = "Delivery Handove
 
         const doRef = order.doNumber || `DO-${order.orderNo}`;
         const batchRef = order.deliveryBatch || "General Batch";
-        const customerRef = order.recipientName || "Franchise Outlet";
+        const customerRef = order.recipientName || "Recipient";
 
         for (const item of confirmedItems) {
             // Deduct based on actual receivedQuantity if confirmed, otherwise ordered quantity

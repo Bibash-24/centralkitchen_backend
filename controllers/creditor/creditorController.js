@@ -227,6 +227,21 @@ const deleteCreditor = async (req, res, next) => {
     }
 };
 
+const parseDateSafely = (dateVal) => {
+    if (!dateVal) return new Date();
+    if (typeof dateVal === 'string' && dateVal.includes('/')) {
+        const parts = dateVal.split('/');
+        if (parts.length === 3) {
+            // Support DD/MM/YYYY
+            const iso = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+            const parsed = new Date(iso);
+            if (!isNaN(parsed.getTime())) return parsed;
+        }
+    }
+    const d = new Date(dateVal);
+    return isNaN(d.getTime()) ? new Date() : d;
+};
+
 const recordPayment = async (req, res, next) => {
     try {
         const { id } = req.params;
@@ -249,7 +264,7 @@ const recordPayment = async (req, res, next) => {
             type: "payment",
             amount: payVal,
             note: note || "Manual Repayment",
-            timestamp: date ? new Date(date) : new Date()
+            timestamp: parseDateSafely(date)
         };
         const finalBalance = Math.max(0, Number((creditor.currentBalance - payVal).toFixed(2)));
 

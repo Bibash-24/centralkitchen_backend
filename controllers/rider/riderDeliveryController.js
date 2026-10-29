@@ -692,7 +692,7 @@ const updateRiderDeliveryStatus = async (req, res, next) => {
                         title: `Delivery Discrepancy: Order #${updatedOrder.orderNo} (${discType})`,
                         category: "Delivery Discrepancy",
                         priority: "High",
-                        description: `Franchise/Outlet: ${updatedOrder.receiverConfirmation.franchise || updatedOrder.recipientName || 'Franchise'}\nDO: ${doNum}\nDiscrepancy Type: ${discType}\nReceiver: ${updatedOrder.receiverConfirmation.receiverName} (${updatedOrder.receiverConfirmation.receiverPhone || 'N/A'})\nDiscrepancy Remarks:\n${discNotes}\n\nItem Checklist Breakdown:\n${itemSummary || 'Refer to DO for item details.'}`,
+                        description: `Recipient: ${updatedOrder.receiverConfirmation.franchise || updatedOrder.recipientName || 'Recipient'}\nDO: ${doNum}\nDiscrepancy Type: ${discType}\nReceiver: ${updatedOrder.receiverConfirmation.receiverName} (${updatedOrder.receiverConfirmation.receiverPhone || 'N/A'})\nDiscrepancy Remarks:\n${discNotes}\n\nItem Checklist Breakdown:\n${itemSummary || 'Refer to DO for item details.'}`,
                         deliveryOrderId: updatedOrder._id,
                         doNumber: doNum,
                         status: "Pending",
