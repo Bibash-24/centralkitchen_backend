@@ -446,13 +446,60 @@ const getFinancialPaymentsReport = async (req, res, next) => {
             };
         }).sort((a, b) => new Date(b.date) - new Date(a.date));
 
+        // E. Return & Refund Audit
+        const returnedOrders = await Order.find({
+            ...companyFilter,
+            isDeleted: { $ne: true },
+            $or: [
+                { deliveryStatus: { $in: ["Returned", "RETURN_INITIATED"] } },
+                { orderStatus: { $in: ["Returned", "RETURN_INITIATED"] } },
+                { paymentStatus: "Refunded" },
+                { returnReason: { $exists: true, $ne: "" } }
+            ],
+            $and: [
+                {
+                    $or: [
+                        { returnedAt: { $gte: start, $lte: end } },
+                        { refundProcessedAt: { $gte: start, $lte: end } },
+                        { createdAt: { $gte: start, $lte: end } }
+                    ]
+                }
+            ]
+        });
+
+        const returnRefundAudit = returnedOrders.map(order => {
+            const isCompleted = order.deliveryStatus === "Returned" || order.paymentStatus === "Refunded";
+            const orderTotal = Number(order.totalAmount || order.total || order.grandTotal || order.bills?.totalWithTax || order.bills?.total || (order.items || []).reduce((s, i) => s + (i.totalPrice || ((i.price || 0) * (i.quantity || 1))), 0) || 0);
+            const returnTimeline = (order.timeline || [])
+                .find(t => String(t.action || "").includes("Return") || String(t.details || "").includes("Return") || String(t.action || "").includes("Refund"));
+            const processedBy = order.returnedBy || order.refundProcessedBy || (returnTimeline ? returnTimeline.user : order.createdBy) || "Staff";
+            const eventDate = order.returnedAt || order.refundProcessedAt || (returnTimeline ? returnTimeline.timestamp || returnTimeline.time : order.updatedAt) || order.createdAt;
+
+            return {
+                orderId: order._id,
+                orderNo: order.orderNo ? String(order.orderNo) : order._id.toString().slice(-6).toUpperCase(),
+                date: eventDate,
+                totalAmount: orderTotal,
+                status: isCompleted ? "Returned & Refunded" : "Return Initiated",
+                isCompleted,
+                returnType: order.returnType || order.refundMethod || (isCompleted ? "Standard Refund" : "Pending Method"),
+                reason: order.returnReason || order.reason || "Not specified",
+                notes: order.returnNotes || order.refundNotes || order.remarks || "",
+                processedBy,
+                recipientName: order.recipientName || order.customerName || order.customerDetails?.name || "Customer",
+                recipientPhone: order.recipientPhone || order.customerPhone || order.customerDetails?.phone || "",
+                items: (order.items || []).map(i => `${i.quantity}x ${i.name}`).join(", ")
+            };
+        }).sort((a, b) => new Date(b.date) - new Date(a.date));
+
         res.status(200).json({
             success: true,
             data: {
                 paymentBreakdown,
                 taxVatReport,
                 creditorLedger,
-                voidAudit
+                voidAudit,
+                returnRefundAudit
             }
         });
     } catch (err) {
