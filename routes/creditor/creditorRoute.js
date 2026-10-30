@@ -210,11 +210,11 @@ const { isVerifiedUser } = require("../../middlewares/tokenVerification");
  *         description: Internal server error
  */
 
-router.get("/", getCreditors);
-router.post("/", createCreditor);
-router.put("/:id", updateCreditor);
-router.delete("/:id", deleteCreditor);
-router.patch("/:id/pay", recordPayment);
+router.get("/", isVerifiedUser, getCreditors);
+router.post("/", isVerifiedUser, createCreditor);
+router.put("/:id", isVerifiedUser, updateCreditor);
+router.delete("/:id", isVerifiedUser, deleteCreditor);
+router.patch("/:id/pay", isVerifiedUser, recordPayment);
 /**
  * @swagger
  * /api/creditor/{id}/waive-off:

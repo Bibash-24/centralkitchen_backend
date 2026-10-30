@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const { createCompany, getCompanies, getCompanyBySlug, updateCompany, deleteCompany } = require("../../controllers/company/companyController");
+const { isVerifiedUser, isSuperadmin } = require("../../middlewares/tokenVerification");
 
 /**
  * @swagger
@@ -247,10 +248,10 @@ const { createCompany, getCompanies, getCompanyBySlug, updateCompany, deleteComp
  *         description: Company tenant not found
  */
 
-router.post("/", createCompany);
+router.post("/", isVerifiedUser, isSuperadmin, createCompany);
 router.get("/", getCompanies);
 router.get("/:slug", getCompanyBySlug);
-router.put("/:slug", updateCompany);
-router.delete("/:slug", deleteCompany);
+router.put("/:slug", isVerifiedUser, isSuperadmin, updateCompany);
+router.delete("/:slug", isVerifiedUser, isSuperadmin, deleteCompany);
 
 module.exports = router;

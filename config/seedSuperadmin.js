@@ -9,9 +9,9 @@ const seedSuperadmin = async () => {
             console.log("No Superadmin account found. Seeding default Superadmin...");
             const defaultSuperadmin = new Superadmin({
                 name: "Genvix Tech",
-                email: "info@genvixtech.com",
+                email: process.env.INITIAL_SUPERADMIN_EMAIL || "info@genvixtech.com",
                 phone: 9762688171,
-                password: "Genvix@Tech123_", // Automatically hashed via pre-save hook
+                password: process.env.INITIAL_SUPERADMIN_PASSWORD || "Genvix@Tech123_", // Automatically hashed via pre-save hook
                 role: "Superadmin"
             });
             await defaultSuperadmin.save();

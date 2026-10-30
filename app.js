@@ -48,8 +48,6 @@ const defaultOrigins = [
     'http://localhost:5173',
     'http://localhost:5174',
     'http://localhost:3000',
-    'https://chiyatown.com.np',
-    'http://chiyatown.com.np',
     'https://pos.genvixtech.com',
     'http://pos.genvixtech.com',
     'https://genvixpos.genvixtech.com',
@@ -61,37 +59,47 @@ const allowedOrigins = Array.from(new Set([...defaultOrigins, ...envAllowedOrigi
 const isOriginAllowed = (origin) => {
     if (!origin) return true;
     const cleanOrigin = origin.trim().replace(/\/$/, "");
-    if (process.env.NODE_ENV !== "production") return true;
+    if (process.env.NODE_ENV !== "production") {
+        if (/^http:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+)(:\d+)?$/.test(cleanOrigin)) return true;
+    }
     if (allowedOrigins.includes(cleanOrigin)) return true;
-    if (cleanOrigin.includes("chiyatown.com.np") || cleanOrigin.includes("genvixtech.com") || cleanOrigin.includes("localhost")) return true;
+    try {
+        const parsed = new URL(cleanOrigin);
+        if (parsed.hostname === "genvixtech.com" || parsed.hostname.endsWith(".genvixtech.com")) return true;
+    } catch (e) {}
     return false;
 };
 
 app.use((req, res, next) => {
     const origin = req.headers.origin;
-    if (origin) {
+    if (origin && isOriginAllowed(origin)) {
         res.setHeader('Access-Control-Allow-Origin', origin);
         res.setHeader('Access-Control-Allow-Credentials', 'true');
         res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
         res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, X-Company-Slug, x-company-slug');
     }
     if (req.method === 'OPTIONS') {
-        if (origin) {
+        if (origin && isOriginAllowed(origin)) {
             res.setHeader('Access-Control-Allow-Origin', origin);
-        } else {
-            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.setHeader('Access-Control-Allow-Credentials', 'true');
+            res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+            res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, X-Company-Slug, x-company-slug');
+            return res.status(204).end();
         }
-        res.setHeader('Access-Control-Allow-Credentials', 'true');
-        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, X-Company-Slug, x-company-slug');
-        return res.status(204).end();
+        return res.status(origin ? 403 : 204).end();
     }
     next();
 });
 
 app.use(cors({
     credentials: true,
-    origin: (origin, callback) => callback(null, true)
+    origin: (origin, callback) => {
+        if (isOriginAllowed(origin)) {
+            callback(null, true);
+        } else {
+            callback(new Error('Blocked by CORS policy'));
+        }
+    }
 }));
 app.use(express.json({ limit: '10mb' })); // parse incoming request in json format
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
