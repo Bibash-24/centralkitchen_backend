@@ -244,8 +244,107 @@ router.route("/license").patch(isVerifiedUser, isSuperadmin, updateLicenseConfig
  */
 router.route("/active-tenants").get(isVerifiedUser, isSuperadmin, getActiveTenants);
 
-module.exports = router;
-
+/**
+ * @swagger
+ * /api/superuser/global-modules:
+ *   get:
+ *     summary: Retrieve global system module configurations
+ *     tags: [Superadmin]
+ *     responses:
+ *       200:
+ *         description: Global module configuration retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     key:
+ *                       type: string
+ *                       example: "global_modules_config"
+ *                     enabledModules:
+ *                       type: array
+ *                       items:
+ *                         type: string
+ *                       example: ["inventory", "sales", "expenses", "accounts", "vendors", "creditors", "deliveries"]
+ *                     enabledSubMenus:
+ *                       type: array
+ *                       items:
+ *                         type: string
+ *                       example: ["dashboard", "orders", "history"]
+ *                     updatedBy:
+ *                       type: string
+ *                       example: "superadmin@example.com"
+ *   patch:
+ *     summary: Update global system module configurations (Superadmin only)
+ *     tags: [Superadmin]
+ *     security:
+ *       - cookieAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               enabledModules:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 description: List of enabled top-level navigation module keys
+ *                 example: ["inventory", "sales", "expenses", "accounts", "vendors", "creditors", "deliveries"]
+ *               enabledSubMenus:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 description: List of enabled submenu keys
+ *                 example: ["dashboard", "orders", "history"]
+ *     responses:
+ *       200:
+ *         description: Global system modules updated successfully
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Forbidden (Superadmin only)
+ *   put:
+ *     summary: Replace global system module configurations (Superadmin only)
+ *     tags: [Superadmin]
+ *     security:
+ *       - cookieAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               enabledModules:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 example: ["inventory", "sales", "expenses", "accounts", "vendors", "creditors", "deliveries"]
+ *               enabledSubMenus:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 example: ["dashboard", "orders", "history"]
+ *     responses:
+ *       200:
+ *         description: Global system modules updated successfully
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Forbidden (Superadmin only)
+ */
 router.route("/global-modules").get(getGlobalModules);
 router.route("/global-modules").patch(isVerifiedUser, isSuperadmin, updateGlobalModules);
 router.route("/global-modules").put(isVerifiedUser, isSuperadmin, updateGlobalModules);
+
+module.exports = router;

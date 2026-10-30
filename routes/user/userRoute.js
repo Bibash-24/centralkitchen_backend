@@ -239,7 +239,107 @@ router.route("/:id/toggle-access").patch(isVerifiedUser, isAdmin, toggleAccess);
  *         description: User not found
  */
 router.route("/update-credentials").patch(isVerifiedUser, updateCredentials);
+
+/**
+ * @swagger
+ * /api/user/update-profile:
+ *   patch:
+ *     summary: Update current logged-in user profile details
+ *     tags: [Users]
+ *     security:
+ *       - cookieAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - name
+ *               - email
+ *               - phone
+ *             properties:
+ *               name:
+ *                 type: string
+ *                 example: "Bibash Sharma"
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 example: "bibash@example.com"
+ *               phone:
+ *                 type: number
+ *                 example: 9876543210
+ *     responses:
+ *       200:
+ *         description: Profile details updated successfully
+ *       400:
+ *         description: Bad request (missing fields, invalid format, or email/phone already in use)
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: User not found
+ */
 router.route("/update-profile").patch(isVerifiedUser, updateProfile);
+
+/**
+ * @swagger
+ * /api/user/{id}/admin-update:
+ *   patch:
+ *     summary: Update user details by Admin or Superadmin
+ *     tags: [Users]
+ *     security:
+ *       - cookieAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Target user ID
+ *         example: "60c72b2f9b1d8b2bad18abc0"
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - name
+ *               - email
+ *               - phone
+ *               - role
+ *             properties:
+ *               name:
+ *                 type: string
+ *                 example: "Jane Doe"
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 example: "jane.doe@example.com"
+ *               phone:
+ *                 type: string
+ *                 example: "9876543210"
+ *               role:
+ *                 type: string
+ *                 example: "cashier"
+ *               image:
+ *                 type: string
+ *                 example: "https://example.com/avatar.jpg"
+ *               isApproved:
+ *                 type: boolean
+ *                 example: true
+ *     responses:
+ *       200:
+ *         description: User updated successfully
+ *       400:
+ *         description: Bad request (validation errors)
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Forbidden (insufficient permissions or role hierarchy violation)
+ *       404:
+ *         description: User not found
+ */
 router.route("/:id/admin-update").patch(isVerifiedUser, isAdmin, adminUpdateUser);
 
 /**

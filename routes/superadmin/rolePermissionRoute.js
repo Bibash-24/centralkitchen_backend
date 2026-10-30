@@ -99,6 +99,40 @@ router.route("/").get(isVerifiedUser, getRolePermissions);
  *         description: Forbidden (Superadmin only)
  */
 router.route("/").patch(isVerifiedUser, isAdmin, updateRolePermissions);
+/**
+ * @swagger
+ * /api/superuser/role-permissions/{role}:
+ *   delete:
+ *     summary: Soft delete a custom role permission configuration (Admin/Superadmin only)
+ *     tags: [Superadmin]
+ *     security:
+ *       - cookieAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: role
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Name of the custom role to delete (System roles like admin/superadmin cannot be deleted)
+ *         example: "packer"
+ *       - in: query
+ *         name: companySlug
+ *         schema:
+ *           type: string
+ *         description: Optional company slug scope for multi-tenant tenancy
+ *         example: "deli-gati"
+ *     responses:
+ *       200:
+ *         description: Role permission configuration deleted successfully
+ *       400:
+ *         description: Bad request (System roles cannot be deleted)
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Forbidden (Admin/Superadmin access required)
+ *       404:
+ *         description: Role permission config not found
+ */
 router.route("/:role").delete(isVerifiedUser, isAdmin, deleteRolePermission);
 
 module.exports = router;
