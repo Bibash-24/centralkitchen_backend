@@ -306,13 +306,15 @@ const getFinancialPaymentsReport = async (req, res, next) => {
     try {
         const { startDate, endDate, period, companySlug } = req.query;
         const targetCompany = companySlug || req.user?.companySlug;
-        const companyFilter = targetCompany ? { companySlug: targetCompany } : {};
+        const companyFilter = (targetCompany && targetCompany !== "all") ? { companySlug: targetCompany } : {};
         const { start, end } = parseDateRange(startDate, endDate, period);
 
-        // Fetch completed orders within range
+        // Fetch completed/active non-cancelled orders within range
         const orders = await Order.find({
             ...companyFilter,
-            isDeleted: { $ne: true }, deliveryStatus: { $nin: ["Cancelled", "CANCELLED", "Returned", "RETURN_INITIATED"] }, orderStatus: { $nin: ["Cancelled", "CANCELLED", "Returned", "RETURN_INITIATED"] },
+            isDeleted: { $ne: true },
+            deliveryStatus: { $nin: ["Cancelled", "CANCELLED", "Returned", "RETURN_INITIATED"] },
+            orderStatus: { $nin: ["Cancelled", "CANCELLED", "Returned", "RETURN_INITIATED"] },
             createdAt: { $gte: start, $lte: end }
         });
 
@@ -327,27 +329,36 @@ const getFinancialPaymentsReport = async (req, res, next) => {
             else if (lower === "fonepay") method = "Fonepay";
             else if (lower === "credit") method = "Credit";
             else if (lower === "cheque" || lower === "check") method = "Cheque";
+            else if (lower === "online") method = "Online";
             else if (method && method !== "Unknown") {
                 method = method.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
             }
 
             const key = method.toLowerCase();
-            const rev = order.bills?.totalWithTax || order.totalAmount || 0;
+            const bills = order.bills || {};
+            const rev = Number(order.totalAmount || order.total || order.grandTotal || bills.totalWithTax || bills.total || (order.items || []).reduce((s, i) => s + (i.totalPrice || ((i.price || 0) * (i.quantity || 1))), 0) || 0);
 
             if (!paymentMap[key]) {
                 paymentMap[key] = {
                     paymentMethod: method,
                     ordersCount: 0,
-                    revenue: 0
+                    revenue: 0,
+                    totalAmount: 0,
+                    transactionCount: 0,
+                    count: 0
                 };
             }
             paymentMap[key].ordersCount += 1;
+            paymentMap[key].transactionCount += 1;
+            paymentMap[key].count += 1;
             paymentMap[key].revenue += rev;
+            paymentMap[key].totalAmount += rev;
         });
 
         const paymentBreakdown = Object.values(paymentMap).map(p => ({
             ...p,
-            revenue: Number(p.revenue.toFixed(2))
+            revenue: Number(p.revenue.toFixed(2)),
+            totalAmount: Number(p.totalAmount.toFixed(2))
         })).sort((a, b) => b.revenue - a.revenue);
 
         // B. Tax & VAT Report
@@ -357,14 +368,14 @@ const getFinancialPaymentsReport = async (req, res, next) => {
 
         orders.forEach(order => {
             const bills = order.bills || {};
-            const totalBeforeTax = bills.total || 0;
-            const tax = bills.tax || 0;
+            const total = Number(order.totalAmount || order.total || order.grandTotal || bills.totalWithTax || bills.total || 0);
+            const tax = Number(order.tax || order.taxAmount || order.vat || bills.tax || 0);
 
             if (tax > 0) {
-                taxableSales += totalBeforeTax;
+                taxableSales += (bills.total || (total - tax));
                 vatCollected += tax;
             } else {
-                nonTaxableSales += totalBeforeTax;
+                nonTaxableSales += total;
             }
         });
 
@@ -408,24 +419,29 @@ const getFinancialPaymentsReport = async (req, res, next) => {
 
         // D. Void & Cancelled Items Audit
         const cancelledOrders = await Order.find({
-            orderStatus: { $in: ["Cancelled", "Rejected"] },
+            ...companyFilter,
+            $or: [
+                { orderStatus: { $in: ["Cancelled", "CANCELLED", "Rejected"] } },
+                { deliveryStatus: { $in: ["Cancelled", "CANCELLED", "Rejected"] } }
+            ],
             createdAt: { $gte: start, $lte: end }
         });
 
         const voidAudit = cancelledOrders.map(order => {
             // Try to find the cancellation info from timeline
             const cancelTimeline = (order.timeline || [])
-                .find(t => t.action === "Status Changed" && (t.details.includes("Cancelled") || t.details.includes("Rejected")));
+                .find(t => t.action === "Status Changed" && (String(t.details).includes("Cancelled") || String(t.details).includes("Rejected")));
             
-            const cancelledBy = cancelTimeline ? cancelTimeline.user : "System/Staff";
+            const cancelledBy = cancelTimeline ? cancelTimeline.user : (order.cancelledBy || order.createdBy || "System/Staff");
+            const orderTotal = Number(order.totalAmount || order.total || order.grandTotal || order.bills?.totalWithTax || order.bills?.total || 0);
             
             return {
                 orderId: order._id,
-                orderNo: order.orderNo ? String(order.orderNo).padStart(3, '0') : order._id.toString().slice(-6).toUpperCase(),
+                orderNo: order.orderNo ? String(order.orderNo) : order._id.toString().slice(-6).toUpperCase(),
                 date: order.createdAt,
-                totalAmount: order.bills?.totalWithTax || 0,
+                totalAmount: orderTotal,
                 cancelledBy,
-                reason: order.remarks || "No reason specified",
+                reason: order.remarks || order.reason || order.cancellationReason || "No reason specified",
                 items: (order.items || []).map(i => `${i.quantity}x ${i.name}`).join(", ")
             };
         }).sort((a, b) => new Date(b.date) - new Date(a.date));
