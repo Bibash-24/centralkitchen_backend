@@ -15,7 +15,7 @@ const seedDropdownOptions = require("./config/seedDropdownOptions");
 const helmet = require("helmet");
 const mongoSanitize = require("express-mongo-sanitize");
 const rateLimit = require("express-rate-limit");
-const { sanitizeInputPayload } = require("./middleware/securityMiddleware");
+const { sanitizeInputPayload } = require("./middlewares/securityMiddleware");
 
 const app = express();
 

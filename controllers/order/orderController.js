@@ -4,7 +4,6 @@ const mongoose = require("mongoose");
 const Order = require("../../models/order/orderModel");
 const Issue = require("../../models/issue/issueModel");
 const { deductDeliveryOrderInventory } = require("../../services/delivery/deliveryInventoryService");
-const Company = require("../../models/company/companyModel");
 const Counter = require("../../models/counter/counterModel");
 const Staff = require("../../models/staff/staffModel");
 const Inventory = require("../../models/inventory/inventoryModel");

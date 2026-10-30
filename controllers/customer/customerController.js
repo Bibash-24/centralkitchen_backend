@@ -1,7 +1,4 @@
 const Customer = require("../../models/customer/customerModel");
-const Expense = require("../../models/expense/expenseModel");
-const User = require("../../models/user/userModel");
-const RestaurantConfig = require("../../models/restaurant/restaurantModel");
 const createError = require("../../middlewares/globalErrorHandler");
 
 const getCustomers = async (req, res, next) => {

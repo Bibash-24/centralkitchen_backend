@@ -3,7 +3,6 @@ const Company = require("../../models/company/companyModel");
 const LicenseConfig = require("../../models/superadmin/licenseModel");
 const Superadmin = require("../../models/superadmin/superadminModel");
 const RestaurantConfig = require("../../models/restaurant/restaurantModel");
-const mongoose = require("mongoose");
 const createHttpError = require("http-errors");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");

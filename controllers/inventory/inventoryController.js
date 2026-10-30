@@ -1,6 +1,5 @@
 const Inventory = require("../../models/inventory/inventoryModel");
 const Purchase = require("../../models/vendor/purchaseModel");
-const Expense = require("../../models/expense/expenseModel");
 const createHttpError = require("http-errors");
 const mongoose = require("mongoose");
 

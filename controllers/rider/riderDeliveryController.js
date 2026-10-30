@@ -4,8 +4,6 @@ const { deductDeliveryOrderInventory } = require("../../services/delivery/delive
 const Issue = require("../../models/issue/issueModel");
 const Order = require("../../models/order/orderModel");
 const Staff = require("../../models/staff/staffModel");
-const RolePermission = require("../../models/superadmin/rolePermissionModel");
-const DropdownOption = require("../../models/dropdownOption/dropdownOptionModel");
 const createHttpError = require("http-errors");
 const mongoose = require("mongoose");
 

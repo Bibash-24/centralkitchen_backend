@@ -1,4 +1,3 @@
-const GlobalModuleConfig = require("../../models/superadmin/globalModuleConfigModel");
 const Counter = require("../../models/counter/counterModel");
 const RestaurantConfig = require("../../models/restaurant/restaurantModel");
 const LicenseConfig = require("../../models/superadmin/licenseModel");
