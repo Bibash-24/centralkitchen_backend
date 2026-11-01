@@ -59,8 +59,27 @@ const isVerifiedUser = async (req, res, next) => {
                 ]
             });
 
-            if (!company || company.isDeleted === true || company.isActive === false) {
-                return next(createHttpError(401, "Your company account has been deleted or disabled. Access denied."));
+            if (!company || company.isDeleted === true) {
+                return next(createHttpError(401, "Your company account has been deleted. Access denied."));
+            }
+
+            if (company) {
+                const now = new Date();
+                const isCompanyExpired = company.licenseStatus === "Expired" || (company.licenseEndDate && now >= new Date(company.licenseEndDate));
+                const isCompanyInactive = company.isActive === false || company.licenseStatus === "Inactive" || company.licenseStatus === "Suspended" || company.licenseStatus === "Deactivated";
+                let status = company.licenseStatus || "Activated";
+                if (isCompanyExpired) {
+                    status = "Expired";
+                } else if (isCompanyInactive) {
+                    status = "Inactive";
+                }
+                user.licenseStatus = status;
+                user.companyLicenseStatus = status;
+                user.licenseStartDate = company.licenseStartDate || null;
+                user.licenseEndDate = company.licenseEndDate || null;
+                user.isCompanyActive = company.isActive !== false;
+                user.isExpired = isCompanyExpired;
+                user.isInactive = isCompanyInactive;
             }
         }
 

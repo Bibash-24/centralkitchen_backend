@@ -129,6 +129,7 @@ const login = async (req, res, next) => {
             return next(error);
         }
 
+        let company = null;
         // Only validate license if the logged in user is not a Superadmin
         if (user.role !== "Superadmin") {
             const Company = require("../../models/company/companyModel");
@@ -139,14 +140,14 @@ const login = async (req, res, next) => {
 
             const cleanUserSlug = String(user.companySlug).toLowerCase().trim();
             const rootSlug = cleanUserSlug.replace(/-deleted-\d+$/, '');
-            const company = await Company.findOne({
+            company = await Company.findOne({
                 $or: [
                     { companySlug: cleanUserSlug },
                     { companySlug: new RegExp('^' + rootSlug + '(-deleted-\\d+)?$', 'i') }
                 ]
             });
 
-            if (!company || company.isDeleted || company.isActive === false) {
+            if (!company || company.isDeleted) {
                 const error = createHttpError(403, "Your company account has been deleted or disabled. Access denied.");
                 return next(error);
             }
@@ -154,9 +155,9 @@ const login = async (req, res, next) => {
             const now = new Date();
             const isExpiredStatus = company.licenseStatus === "Expired";
             const isDateExpired = company.licenseEndDate && now > new Date(company.licenseEndDate);
+            // Allow login when company license is expired; frontend will show in-app banner
             if (isExpiredStatus || isDateExpired) {
-                const error = createHttpError(403, "Your company license is expired or inactive. Please contact Superadmin.");
-                return next(error);
+                // License expired - permitted to login with banner
             }
         }
 
@@ -178,8 +179,7 @@ const login = async (req, res, next) => {
                 }
 
                 if (!license.isTrialActive && !license.isSystemActivated) {
-                    const error = createHttpError(403, "System License is expired or inactive. Please contact system provider.");
-                    return next(error);
+                    // System license inactive/expired - permitted to login with banner
                 }
             }
         }
@@ -218,6 +218,25 @@ const login = async (req, res, next) => {
         delete userData.password;
         delete userData.__v;
 
+        if (company) {
+            const now = new Date();
+            const isCompanyExpired = company.licenseStatus === "Expired" || (company.licenseEndDate && now >= new Date(company.licenseEndDate));
+            const isCompanyInactive = company.isActive === false || company.licenseStatus === "Inactive" || company.licenseStatus === "Suspended" || company.licenseStatus === "Deactivated";
+            let status = company.licenseStatus || "Activated";
+            if (isCompanyExpired) {
+                status = "Expired";
+            } else if (isCompanyInactive) {
+                status = "Inactive";
+            }
+            userData.licenseStatus = status;
+            userData.companyLicenseStatus = status;
+            userData.licenseStartDate = company.licenseStartDate || null;
+            userData.licenseEndDate = company.licenseEndDate || null;
+            userData.isCompanyActive = company.isActive !== false;
+            userData.isExpired = isCompanyExpired;
+            userData.isInactive = isCompanyInactive;
+        }
+
         res.status(200).json({
             success: true,
             message: `Welcome back, ${userData.name}!`,
@@ -232,10 +251,35 @@ const login = async (req, res, next) => {
 
 const getUserData = async (req, res, next) => {
     try {
+        let userData = req.user ? (req.user.toObject ? req.user.toObject() : { ...req.user }) : {};
+        if (userData.companySlug && userData.role !== "Superadmin") {
+            try {
+                const Company = require("../../models/company/companyModel");
+                const company = await Company.findOne({ companySlug: String(userData.companySlug).toLowerCase().trim() });
+                if (company) {
+                    const now = new Date();
+                    const isCompanyExpired = company.licenseStatus === "Expired" || (company.licenseEndDate && now >= new Date(company.licenseEndDate));
+                    const isCompanyInactive = company.isActive === false || company.licenseStatus === "Inactive" || company.licenseStatus === "Suspended" || company.licenseStatus === "Deactivated";
+                    let status = company.licenseStatus || "Activated";
+                    if (isCompanyExpired) {
+                        status = "Expired";
+                    } else if (isCompanyInactive) {
+                        status = "Inactive";
+                    }
+                    userData.licenseStatus = status;
+                    userData.companyLicenseStatus = status;
+                    userData.licenseStartDate = company.licenseStartDate || null;
+                    userData.licenseEndDate = company.licenseEndDate || null;
+                    userData.isCompanyActive = company.isActive !== false;
+                    userData.isExpired = isCompanyExpired;
+                    userData.isInactive = isCompanyInactive;
+                }
+            } catch (err) {}
+        }
         res.status(200).json({
             success: true,
             message: "User data retrieved successfully!",
-            data: req.user
+            data: userData
         });
     } catch (error) {
         next(error);

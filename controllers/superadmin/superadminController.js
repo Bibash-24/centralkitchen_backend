@@ -177,18 +177,43 @@ const getActiveTenants = async (req, res, next) => {
 
 const getLicenseConfig = async (req, res, next) => {
     try {
-        const userSlug = req.user?.companySlug || req.headers["x-company-slug"];
+        const userSlug = req.query?.companySlug || req.user?.companySlug || req.headers["x-company-slug"];
         let config = null;
+        let company = null;
         if (userSlug && req.user?.role !== "Superadmin") {
+            try {
+                const Company = require("../../models/company/companyModel");
+                company = await Company.findOne({ companySlug: String(userSlug).toLowerCase().trim() });
+            } catch (err) {}
             config = await LicenseConfig.findOne({ companySlug: userSlug });
         }
         if (!config) {
             config = await LicenseConfig.findOne();
         }
+        let responseData = config ? (config.toObject ? config.toObject() : { ...config }) : {};
+        if (company) {
+            const now = new Date();
+            const isCompanyExpired = company.licenseStatus === "Expired" || (company.licenseEndDate && now >= new Date(company.licenseEndDate));
+            const isCompanyInactive = company.isActive === false || company.licenseStatus === "Inactive" || company.licenseStatus === "Suspended" || company.licenseStatus === "Deactivated";
+            let status = company.licenseStatus || "Activated";
+            if (isCompanyExpired) {
+                status = "Expired";
+            } else if (isCompanyInactive) {
+                status = "Inactive";
+            }
+            responseData.companyLicenseStatus = status;
+            responseData.licenseStatus = status;
+            if (company.licenseStartDate) responseData.licenseStartDate = company.licenseStartDate;
+            if (company.licenseEndDate) responseData.licenseEndDate = company.licenseEndDate;
+            responseData.isCompanyActive = company.isActive !== false;
+            responseData.isExpired = isCompanyExpired;
+            responseData.isInactive = isCompanyInactive;
+            responseData.isLicenseActive = !isCompanyExpired && !isCompanyInactive;
+        }
         res.status(200).json({
             success: true,
             message: "License configuration retrieved successfully!",
-            data: config
+            data: responseData
         });
     } catch (error) {
         next(error);
