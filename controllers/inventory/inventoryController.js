@@ -1,4 +1,5 @@
 const Inventory = require("../../models/inventory/inventoryModel");
+const Vendor = require("../../models/vendor/vendorModel");
 const Purchase = require("../../models/vendor/purchaseModel");
 const createHttpError = require("http-errors");
 const mongoose = require("mongoose");
@@ -6,7 +7,13 @@ const mongoose = require("mongoose");
 // GET /api/inventory
 const getInventoryItems = async (req, res, next) => {
     try {
-        const items = await Inventory.find({ isDeleted: { $ne: true } })
+        const targetSlug = req.query.companySlug || req.headers["x-company-slug"] || req.user?.companySlug;
+        const filter = { isDeleted: { $ne: true } };
+        if (targetSlug && targetSlug !== "all") {
+            filter.companySlug = targetSlug;
+        }
+
+        const items = await Inventory.find(filter)
             .select("-adjustments")
             .populate("vendor")
             .sort({ createdAt: -1 });
@@ -23,7 +30,7 @@ const getInventoryItems = async (req, res, next) => {
 // POST /api/inventory
 const createInventoryItem = async (req, res, next) => {
     try {
-        const { name, unit, currentStock, lowStockThreshold, targetStock, cost, category, vendor, paymentStatus, paymentMethod, paidAmount } = req.body;
+        const { companySlug, name, unit, currentStock, lowStockThreshold, targetStock, cost, category, vendor, paymentStatus, paymentMethod, paidAmount } = req.body;
 
         if (!name || !name.trim()) {
             return next(createHttpError(400, "Item name is required!"));
@@ -38,16 +45,35 @@ const createInventoryItem = async (req, res, next) => {
             return next(createHttpError(400, "Invalid unit choice!"));
         }
 
+        let targetSlug = companySlug || req.headers["x-company-slug"] || req.query.companySlug || req.user?.companySlug;
+        if (!targetSlug || targetSlug === "all") {
+            const Company = require("../../models/company/companyModel");
+            const firstCompany = await Company.findOne({ isDeleted: { $ne: true } });
+            if (firstCompany) {
+                targetSlug = firstCompany.companySlug;
+            } else {
+                targetSlug = "default-company";
+            }
+        }
+
         const actorName = req.user ? (req.user.email || String(req.user.phone || req.user.role)) : "System";
 
-        // Check uniqueness of active items
-        const duplicate = await Inventory.findOne({ name, isDeleted: { $ne: true } });
+        // Check uniqueness of active items within company
+        const dupFilter = {
+            name: { $regex: new RegExp(`^${name.trim()}$`, "i") },
+            isDeleted: { $ne: true }
+        };
+        if (targetSlug) {
+            dupFilter.companySlug = targetSlug;
+        }
+        const duplicate = await Inventory.findOne(dupFilter);
         if (duplicate) {
-            return next(createHttpError(400, "Inventory item with this name already exists!"));
+            return next(createHttpError(400, "Inventory item with this name already exists in this company!"));
         }
 
         const item = new Inventory({
-            name,
+            companySlug: targetSlug,
+            name: name.trim(),
             unit,
             currentStock: currentStock !== undefined ? Number(currentStock) : 0,
             lowStockThreshold: (lowStockThreshold !== undefined && lowStockThreshold !== "" && lowStockThreshold !== null) ? Number(lowStockThreshold) : null,
@@ -76,7 +102,7 @@ const createInventoryItem = async (req, res, next) => {
             const resolvedMethod = (isPaid || isPartial) ? (paymentMethod || "Cash") : "Credit";
 
             const purchase = new Purchase({
-                companySlug: item.companySlug || req.user?.companySlug,
+                companySlug: targetSlug,
                 item: item._id,
                 vendor: item.vendor || null,
                 quantity: item.currentStock,
@@ -107,11 +133,13 @@ const createInventoryItem = async (req, res, next) => {
 const updateInventoryItem = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const { name, unit, currentStock, lowStockThreshold, targetStock, cost, category, vendor, paymentStatus, paymentMethod, paidAmount, chequeDate } = req.body;
+        const { companySlug, name, unit, currentStock, lowStockThreshold, targetStock, cost, category, vendor, paymentStatus, paymentMethod, paidAmount, chequeDate } = req.body;
 
         if (!mongoose.Types.ObjectId.isValid(id)) {
             return next(createHttpError(400, "Invalid item ID!"));
         }
+
+        let targetSlug = companySlug || req.headers["x-company-slug"] || req.query.companySlug || req.user?.companySlug;
 
         const item = await Inventory.findOne({ _id: id, isDeleted: { $ne: true } });
         if (!item) {
@@ -127,12 +155,21 @@ const updateInventoryItem = async (req, res, next) => {
         }
 
         const actorName = req.user ? (req.user.email || String(req.user.phone || req.user.role)) : "System";
+        const itemSlug = item.companySlug || targetSlug;
 
-        // Check uniqueness of active items if name changed
+        // Check uniqueness of active items within company if name changed
         if (name && name.trim().toLowerCase() !== item.name.toLowerCase()) {
-            const duplicate = await Inventory.findOne({ name, isDeleted: { $ne: true } });
+            const dupFilter = {
+                _id: { $ne: id },
+                name: { $regex: new RegExp(`^${name.trim()}$`, "i") },
+                isDeleted: { $ne: true }
+            };
+            if (itemSlug) {
+                dupFilter.companySlug = itemSlug;
+            }
+            const duplicate = await Inventory.findOne(dupFilter);
             if (duplicate) {
-                return next(createHttpError(400, "Inventory item with this name already exists!"));
+                return next(createHttpError(400, "Inventory item with this name already exists in this company!"));
             }
         }
 
@@ -140,7 +177,7 @@ const updateInventoryItem = async (req, res, next) => {
         const prevVendor = item.vendor;
 
         // Perform updates
-        if (name) item.name = name;
+        if (name) item.name = name.trim();
         if (unit) item.unit = unit;
         if (currentStock !== undefined) item.currentStock = Number(currentStock);
         if (lowStockThreshold !== undefined) item.lowStockThreshold = (lowStockThreshold === "" || lowStockThreshold === null) ? null : Number(lowStockThreshold);
@@ -148,11 +185,16 @@ const updateInventoryItem = async (req, res, next) => {
         if (cost !== undefined) item.cost = Number(cost);
         if (category) item.category = category;
         if (vendor !== undefined) item.vendor = vendor || null;
+        if (targetSlug && !item.companySlug) {
+            item.companySlug = targetSlug;
+        }
 
         item.updatedBy = actorName;
         item.updatedOn = new Date();
 
         await item.save();
+
+        const resolvedCompanySlug = item.companySlug || targetSlug || req.user?.companySlug;
 
         const getVendorId = (v) => {
             if (!v) return "";
@@ -180,7 +222,7 @@ const updateInventoryItem = async (req, res, next) => {
                     const resolvedMethod = (isPaid || isPartial) ? (paymentMethod || "Cash") : "Credit";
 
                     const purchase = new Purchase({
-                        companySlug: item.companySlug || req.user?.companySlug,
+                        companySlug: resolvedCompanySlug || item.companySlug || req.user?.companySlug,
                         item: item._id,
                         vendor: item.vendor,
                         quantity: item.currentStock,
@@ -212,7 +254,7 @@ const updateInventoryItem = async (req, res, next) => {
             const resolvedMethod = (isPaid || isPartial) ? (paymentMethod || "Cash") : "Credit";
 
             const purchase = new Purchase({
-                companySlug: item.companySlug || req.user?.companySlug,
+                companySlug: resolvedCompanySlug || item.companySlug || req.user?.companySlug,
                 item: item._id,
                 vendor: item.vendor || null,
                 quantity: diff,

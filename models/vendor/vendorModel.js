@@ -1,7 +1,15 @@
 const mongoose = require("mongoose");
 
 const vendorSchema = new mongoose.Schema({
-  companySlug: { type: String,  required: true, index: true },
+  companySlug: {
+    type: String,
+    index: true,
+    default: "default-company",
+    set: function(val) {
+      if (!val || String(val).trim() === "") return "default-company";
+      return String(val).trim();
+    }
+  },
     name: {
         type: String,
         required: true
@@ -52,5 +60,11 @@ const vendorSchema = new mongoose.Schema({
         required: false
     }
 }, { timestamps: true });
+
+vendorSchema.pre("validate", function() {
+    if (!this.companySlug || typeof this.companySlug !== "string" || !this.companySlug.trim()) {
+        this.companySlug = "default-company";
+    }
+});
 
 module.exports = mongoose.model("Vendor", vendorSchema);

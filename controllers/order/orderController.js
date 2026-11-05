@@ -450,7 +450,7 @@ const createDeliveryOrder = async (req, res, next) => {
                 const counter = await Counter.findByIdAndUpdate(
                     { _id: { companySlug: counterSlug, seqName: "orderNo" } },
                     { $inc: { seq: 1 } },
-                    { new: true, upsert: true }
+                    { returnDocument: 'after', upsert: true }
                 );
 
                 const candidate = `${companyPrefix}-${String(counter.seq).padStart(4, "0")}`;
@@ -522,6 +522,22 @@ const createDeliveryOrder = async (req, res, next) => {
 };
 
 // Fetch delivery orders with filtering & search
+const getDeliveryOrderById = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        const order = await Order.findById(id);
+        if (!order) {
+            return next(createHttpError(404, "Delivery order not found."));
+        }
+        res.status(200).json({
+            success: true,
+            data: order
+        });
+    } catch (err) {
+        next(err);
+    }
+};
+
 const getDeliveryOrders = async (req, res, next) => {
     try {
         const { status, search, period, startDate, endDate } = req.query;
@@ -1185,6 +1201,7 @@ const updateOrderPaymentReceived = async (req, res, next) => {
 
 module.exports = {
     createDeliveryOrder,
+    getDeliveryOrderById,
     getDeliveryOrders,
     updateDeliveryStatus,
     assignRider,

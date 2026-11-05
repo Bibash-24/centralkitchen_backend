@@ -30,7 +30,7 @@ const getRestaurantConfig = async (req, res, next) => {
             config = await RestaurantConfig.findOne();
         }
 
-        const reportSubmenus = ["sales-revenue", "financial-payments", "stock-inventory", "expenses-costs", "profitability", "crm-loyalty"];
+        const reportSubmenus = ["sales-revenue", "financial-payments", "stock-inventory", "commodity-ratio", "expenses-costs", "profitability", "crm-loyalty"];
         const defaultModules = ["home", "orders", "sales", "expenses", "accounts", "inventory", "customers", "creditors", "vendors", "menuSetup", "settings", "reports"];
         const defaultSubMenus = [
             "home-foh", "home-boh", "home-date-filter", "home-popular-dishes", "home-revenue-breakdown", "home-payment-mix", "home-expense-trend", "home-expense-breakdown", "home-order-distribution", "home-creditors-ledger", "home-loyalty-lifecycle",

@@ -1,11 +1,10 @@
 const mongoose = require("mongoose");
 
 const inventorySchema = new mongoose.Schema({
-  companySlug: { type: String,  required: true, index: true },
+  companySlug: { type: String, required: true, index: true, default: "default-company" },
     name: {
         type: String,
         required: true,
-        unique: true,
         trim: true
     },
     unit: {
@@ -77,5 +76,13 @@ const inventorySchema = new mongoose.Schema({
         required: false
     }
 }, { timestamps: true });
+
+inventorySchema.index({ companySlug: 1, name: 1 }, { unique: true });
+
+inventorySchema.pre("validate", function() {
+    if (!this.companySlug || typeof this.companySlug !== "string" || !this.companySlug.trim()) {
+        this.companySlug = "default-company";
+    }
+});
 
 module.exports = mongoose.model("Inventory", inventorySchema);

@@ -4,7 +4,18 @@ const createError = require("http-errors");
 
 const getVendors = async (req, res, next) => {
     try {
-        const vendors = await Vendor.find({ isDeleted: { $ne: true } }).sort({ createdAt: -1 });
+        const targetSlug = req.query.companySlug || req.headers["x-company-slug"] || req.user?.companySlug;
+        const filter = { isDeleted: { $ne: true } };
+        if (targetSlug && targetSlug !== "all") {
+            filter.$or = [
+                { companySlug: targetSlug },
+                { companySlug: { $exists: false } },
+                { companySlug: null },
+                { companySlug: "" }
+            ];
+        }
+
+        const vendors = await Vendor.find(filter).sort({ createdAt: -1 });
         
         const enrichedVendors = [];
         for (const vendor of vendors) {
@@ -30,7 +41,21 @@ const getVendors = async (req, res, next) => {
 
 const createVendor = async (req, res, next) => {
     try {
-        const { name, contactNumber, address, email, isActive } = req.body;
+        const { companySlug, name, contactNumber, address, email, isActive } = req.body;
+        let targetSlug = (companySlug && String(companySlug).trim() !== "" && companySlug !== "all")
+            ? String(companySlug).trim()
+            : (req.headers["x-company-slug"] || req.query.companySlug || req.user?.companySlug);
+
+        if (!targetSlug || targetSlug === "all" || String(targetSlug).trim() === "") {
+            const Company = require("../../models/company/companyModel");
+            const firstCompany = await Company.findOne({ isDeleted: { $ne: true } });
+            if (firstCompany && firstCompany.companySlug) {
+                targetSlug = firstCompany.companySlug;
+            } else {
+                targetSlug = "default-company";
+            }
+        }
+
         if (!name || !contactNumber || !address) {
             const error = createError(400, "Full Name, Contact Number, and Address are required!");
             return next(error);
@@ -49,10 +74,19 @@ const createVendor = async (req, res, next) => {
         }
 
         // Check unique contactNumber constraints
-        const existingByPhone = await Vendor.findOne({
+        const phoneFilter = {
             isDeleted: { $ne: true },
             contactNumber
-        });
+        };
+        if (targetSlug) {
+            phoneFilter.$or = [
+                { companySlug: targetSlug },
+                { companySlug: { $exists: false } },
+                { companySlug: null },
+                { companySlug: "" }
+            ];
+        }
+        const existingByPhone = await Vendor.findOne(phoneFilter);
         if (existingByPhone) {
             const error = createError(400, "Vendor with this contact number already exists!");
             return next(error);
@@ -60,10 +94,19 @@ const createVendor = async (req, res, next) => {
 
         // Check unique email constraints if email is provided
         if (email) {
-            const existingByEmail = await Vendor.findOne({
+            const emailFilter = {
                 isDeleted: { $ne: true },
                 email
-            });
+            };
+            if (targetSlug) {
+                emailFilter.$or = [
+                    { companySlug: targetSlug },
+                    { companySlug: { $exists: false } },
+                    { companySlug: null },
+                    { companySlug: "" }
+                ];
+            }
+            const existingByEmail = await Vendor.findOne(emailFilter);
             if (existingByEmail) {
                 const error = createError(400, "Vendor with this email address already exists!");
                 return next(error);
@@ -72,10 +115,11 @@ const createVendor = async (req, res, next) => {
 
         const actorName = req.user ? (req.user.email || String(req.user.phone || req.user.role)) : "System";
         const vendor = new Vendor({
-            name,
-            contactNumber,
-            address,
-            email: email || "",
+            companySlug: targetSlug || "default-company",
+            name: name.trim(),
+            contactNumber: contactNumber.trim(),
+            address: address.trim(),
+            email: email ? email.trim() : "",
             isActive: isActive !== undefined ? isActive : true,
             createdBy: actorName
         });
@@ -95,7 +139,10 @@ const createVendor = async (req, res, next) => {
 const updateVendor = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const { name, contactNumber, address, email, isActive } = req.body;
+        const { companySlug, name, contactNumber, address, email, isActive } = req.body;
+        let targetSlug = (companySlug && String(companySlug).trim() !== "" && companySlug !== "all")
+            ? String(companySlug).trim()
+            : (req.headers["x-company-slug"] || req.query.companySlug || req.user?.companySlug);
 
         if (!name || !contactNumber || !address) {
             const error = createError(400, "Full Name, Contact Number, and Address are required!");
@@ -120,23 +167,47 @@ const updateVendor = async (req, res, next) => {
             return next(error);
         }
 
+        if (!targetSlug || targetSlug === "all" || String(targetSlug).trim() === "") {
+            targetSlug = vendor.companySlug || req.user?.companySlug || "default-company";
+        }
+
+        const vendorSlug = targetSlug || vendor.companySlug || "default-company";
+
         // Check constraints matching other vendors
-        const otherByPhone = await Vendor.findOne({
+        const otherPhoneFilter = {
             _id: { $ne: id },
             isDeleted: { $ne: true },
             contactNumber
-        });
+        };
+        if (vendorSlug) {
+            otherPhoneFilter.$or = [
+                { companySlug: vendorSlug },
+                { companySlug: { $exists: false } },
+                { companySlug: null },
+                { companySlug: "" }
+            ];
+        }
+        const otherByPhone = await Vendor.findOne(otherPhoneFilter);
         if (otherByPhone) {
             const error = createError(400, "Vendor with this contact number already exists!");
             return next(error);
         }
 
         if (email) {
-            const otherByEmail = await Vendor.findOne({
+            const otherEmailFilter = {
                 _id: { $ne: id },
                 isDeleted: { $ne: true },
                 email
-            });
+            };
+            if (vendorSlug) {
+                otherEmailFilter.$or = [
+                    { companySlug: vendorSlug },
+                    { companySlug: { $exists: false } },
+                    { companySlug: null },
+                    { companySlug: "" }
+                ];
+            }
+            const otherByEmail = await Vendor.findOne(otherEmailFilter);
             if (otherByEmail) {
                 const error = createError(400, "Vendor with this email address already exists!");
                 return next(error);
@@ -144,12 +215,15 @@ const updateVendor = async (req, res, next) => {
         }
 
         const actorName = req.user ? (req.user.email || String(req.user.phone || req.user.role)) : "System";
-        vendor.name = name;
-        vendor.contactNumber = contactNumber;
-        vendor.address = address;
-        vendor.email = email || "";
+        vendor.name = name.trim();
+        vendor.contactNumber = contactNumber.trim();
+        vendor.address = address.trim();
+        vendor.email = email ? email.trim() : "";
         if (isActive !== undefined) {
             vendor.isActive = isActive;
+        }
+        if (targetSlug && (!vendor.companySlug || vendor.companySlug === "")) {
+            vendor.companySlug = targetSlug;
         }
         vendor.updatedBy = actorName;
         vendor.updatedOn = new Date();

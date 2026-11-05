@@ -1,7 +1,7 @@
 const mongoose = require("mongoose");
 
 const expenseSchema = new mongoose.Schema({
-  companySlug: { type: String,  required: true, index: true },
+  companySlug: { type: String, required: true, index: true, default: "default-company" },
     description: {
         type: String,
         required: true
@@ -52,5 +52,11 @@ expenseSchema.index({ date: -1 });
 expenseSchema.index({ method: 1 });
 expenseSchema.index({ vendor: 1 });
 expenseSchema.index({ createdAt: -1 });
+
+expenseSchema.pre("validate", function() {
+    if (!this.companySlug || typeof this.companySlug !== "string" || !this.companySlug.trim()) {
+        this.companySlug = "default-company";
+    }
+});
 
 module.exports = mongoose.model("Expense", expenseSchema);

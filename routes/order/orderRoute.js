@@ -1,7 +1,7 @@
 const { isVerifiedUser } = require("../../middlewares/tokenVerification");
 const express = require("express");
 const router = express.Router();
-const { createDeliveryOrder, getDeliveryOrders, updateDeliveryStatus, assignRider, updateDeliveryOrder, deleteDeliveryOrder, updateOrderPaymentReceived } = require("../../controllers/order/orderController");
+const { createDeliveryOrder, getDeliveryOrderById, getDeliveryOrders, updateDeliveryStatus, assignRider, updateDeliveryOrder, deleteDeliveryOrder, updateOrderPaymentReceived } = require("../../controllers/order/orderController");
 
 /**
  * @swagger
@@ -474,6 +474,7 @@ router.post("/", isVerifiedUser, createDeliveryOrder);
 router.put("/:id", isVerifiedUser, updateDeliveryOrder);
 router.delete("/:id", isVerifiedUser, deleteDeliveryOrder);
 router.get("/", isVerifiedUser, getDeliveryOrders);
+router.get("/:id", isVerifiedUser, getDeliveryOrderById);
 router.patch("/:id/status", isVerifiedUser, updateDeliveryStatus);
 router.patch("/:id/assign-rider", isVerifiedUser, assignRider);
 router.patch("/:id/payment-received", isVerifiedUser, updateOrderPaymentReceived);

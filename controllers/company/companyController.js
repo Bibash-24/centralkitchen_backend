@@ -60,7 +60,7 @@ const createCompany = async (req, res, next) => {
                     orderCounter: finalTicker
                 }
             },
-            { upsert: true, new: true }
+            { upsert: true, returnDocument: 'after' }
         );
 
         // Save counter sequence to Counter collection
@@ -68,7 +68,7 @@ const createCompany = async (req, res, next) => {
         await Counter.findOneAndUpdate(
             { _id: { companySlug: cleanedSlug, seqName: "orderNo" } },
             { $set: { seq: seqVal } },
-            { upsert: true, new: true }
+            { upsert: true, returnDocument: 'after' }
         );
         
         // Save slug-wise LicenseConfig document in DB
@@ -84,7 +84,7 @@ const createCompany = async (req, res, next) => {
                 activationEndDate: licenseEndDate || undefined,
                 yearlyFee: Number(yearlyFee) || 0
             },
-            { upsert: true, new: true }
+            { upsert: true, returnDocument: 'after' }
         );
 
         // Create initial Admin user account for this company if login details provided
@@ -165,7 +165,7 @@ const getCompanyBySlug = async (req, res, next) => {
 const updateCompany = async (req, res, next) => {
     try {
         const { slug } = req.params;
-        const { name, companySlug, contactEmail, contactPhone, isActive, enabledModules, licenseStatus, licenseStartDate, licenseEndDate, yearlyFee, orderNoPrefix, counterTicker } = req.body;
+        const { name, companySlug, contactEmail, contactPhone, isActive, enabledModules, enabledSubMenus, licenseStatus, licenseStartDate, licenseEndDate, yearlyFee, orderNoPrefix, counterTicker } = req.body;
 
         const company = await Company.findOne({ companySlug: String(slug).toLowerCase() });
         if (!company) {
@@ -196,6 +196,7 @@ const updateCompany = async (req, res, next) => {
         if (contactPhone !== undefined) company.contactPhone = contactPhone;
         if (isActive !== undefined) company.isActive = Boolean(isActive);
         if (Array.isArray(enabledModules)) company.enabledModules = enabledModules;
+        if (Array.isArray(enabledSubMenus)) company.enabledSubMenus = enabledSubMenus;
         if (yearlyFee !== undefined) company.yearlyFee = Number(yearlyFee) || 0;
         if (licenseStatus) company.licenseStatus = licenseStatus;
         if (licenseStartDate !== undefined) company.licenseStartDate = licenseStartDate ? new Date(licenseStartDate) : null;
@@ -217,10 +218,12 @@ const updateCompany = async (req, res, next) => {
                     name: company.name,
                     orderNoPrefix: updatedPrefix,
                     counterTicker: updatedTicker,
-                    orderCounter: updatedTicker
+                    orderCounter: updatedTicker,
+                    ...(Array.isArray(enabledModules) ? { enabledModules } : {}),
+                    ...(Array.isArray(enabledSubMenus) ? { enabledSubMenus } : {})
                 }
             },
-            { upsert: true, new: true }
+            { upsert: true, returnDocument: 'after' }
         );
 
         // Sync Counter collection
@@ -229,7 +232,7 @@ const updateCompany = async (req, res, next) => {
             await Counter.findOneAndUpdate(
                 { _id: { companySlug: company.companySlug, seqName: "orderNo" } },
                 { $set: { seq: seqVal } },
-                { upsert: true, new: true }
+                { upsert: true, returnDocument: 'after' }
             );
         }
 
@@ -246,7 +249,7 @@ const updateCompany = async (req, res, next) => {
                 activationEndDate: company.licenseEndDate ? company.licenseEndDate.toISOString().split('T')[0] : undefined,
                 yearlyFee: Number(company.yearlyFee) || 0
             },
-            { upsert: true, new: true }
+            { upsert: true, returnDocument: 'after' }
         );
 
         res.status(200).json({

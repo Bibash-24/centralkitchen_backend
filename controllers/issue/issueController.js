@@ -93,7 +93,7 @@ const updateIssueStatus = async (req, res, next) => {
         const updatedIssue = await Issue.findByIdAndUpdate(
             id,
             { status },
-            { new: true }
+            { returnDocument: 'after' }
         );
 
         if (!updatedIssue) {

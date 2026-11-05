@@ -6,11 +6,19 @@ const mongoose = require("mongoose");
 // POST /api/menu-item
 const addMenuItem = async (req, res, next) => {
     try {
-        const { name, price, categoryId, isSalesHourItem, startTime, endTime, salePrice, recipe } = req.body;
+        const { companySlug, name, price, categoryId, isSalesHourItem, startTime, endTime, salePrice, recipe } = req.body;
 
         if (!name || !name.trim()) {
             return next(createHttpError(400, "Item name is required!"));
         }
+
+        let targetSlug = companySlug || req.headers["x-company-slug"] || req.query.companySlug || req.user?.companySlug;
+        if (!targetSlug || targetSlug === "all") {
+            const Company = require("../../models/company/companyModel");
+            const firstCompany = await Company.findOne({ isDeleted: { $ne: true } });
+            targetSlug = firstCompany ? firstCompany.companySlug : "default-company";
+        }
+
         const priceStr = String(price).trim();
         const isValidPrice = /^[0-9/]+$/.test(priceStr) && priceStr.split('/').every(part => !isNaN(part) && Number(part) > 0);
         if (!isValidPrice) {
@@ -27,12 +35,15 @@ const addMenuItem = async (req, res, next) => {
         }
 
         // Duplicate name check
-        const nameExists = await MenuItem.findOne({
+        const dupFilter = {
             name: { $regex: new RegExp(`^${name.trim()}$`, "i") },
             isDeleted: { $ne: true }
-        });
+        };
+        if (targetSlug) dupFilter.companySlug = targetSlug;
+
+        const nameExists = await MenuItem.findOne(dupFilter);
         if (nameExists) {
-            return next(createHttpError(400, `A menu item named "${name.trim()}" already exists!`));
+            return next(createHttpError(400, `A menu item named "${name.trim()}" already exists in this company!`));
         }
 
         // Validate promo price
@@ -69,6 +80,7 @@ const addMenuItem = async (req, res, next) => {
         const actorName = req.user ? (req.user.email || String(req.user.phone || req.user.role)) : "System";
 
         const item = new MenuItem({
+            companySlug: targetSlug,
             name: name.trim(),
             price: priceStr,
             category: categoryId,
@@ -97,8 +109,14 @@ const addMenuItem = async (req, res, next) => {
 // GET /api/menu-item
 const getMenuItems = async (req, res, next) => {
     try {
+        const targetSlug = req.query.companySlug || req.headers["x-company-slug"] || req.user?.companySlug;
+        const filter = { isDeleted: { $ne: true } };
+        if (targetSlug && targetSlug !== "all") {
+            filter.companySlug = targetSlug;
+        }
+
         const items = await MenuItem
-            .find({ isDeleted: { $ne: true } })
+            .find(filter)
             .populate("category", "name isActive")
             .populate("recipe.inventoryItem", "name unit")
             .sort({ createdAt: 1 });
@@ -117,26 +135,33 @@ const getMenuItems = async (req, res, next) => {
 const updateMenuItem = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const { name, price, categoryId, isActive, isSalesHourItem, startTime, endTime, salePrice, recipe } = req.body;
+        const { companySlug, name, price, categoryId, isActive, isSalesHourItem, startTime, endTime, salePrice, recipe } = req.body;
 
         if (!mongoose.Types.ObjectId.isValid(id)) {
             return next(createHttpError(400, "Invalid item ID!"));
         }
+
+        let targetSlug = companySlug || req.headers["x-company-slug"] || req.query.companySlug || req.user?.companySlug;
 
         const item = await MenuItem.findOne({ _id: id, isDeleted: { $ne: true } });
         if (!item) {
             return next(createHttpError(404, "Menu item not found!"));
         }
 
+        const itemSlug = item.companySlug || targetSlug;
+
         // Duplicate name check (exclude self)
         if (name && name.trim().toLowerCase() !== item.name.toLowerCase()) {
-            const nameExists = await MenuItem.findOne({
+            const dupFilter = {
                 name: { $regex: new RegExp(`^${name.trim()}$`, "i") },
                 _id: { $ne: id },
                 isDeleted: { $ne: true }
-            });
+            };
+            if (itemSlug) dupFilter.companySlug = itemSlug;
+
+            const nameExists = await MenuItem.findOne(dupFilter);
             if (nameExists) {
-                return next(createHttpError(400, `A menu item named "${name.trim()}" already exists!`));
+                return next(createHttpError(400, `A menu item named "${name.trim()}" already exists in this company!`));
             }
         }
 
@@ -220,6 +245,7 @@ const updateMenuItem = async (req, res, next) => {
             }));
         }
 
+        if (targetSlug && !item.companySlug) item.companySlug = targetSlug;
         item.updatedBy = actorName;
 
         await item.save();

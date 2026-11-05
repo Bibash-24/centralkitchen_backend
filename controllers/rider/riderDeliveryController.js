@@ -644,7 +644,7 @@ const updateRiderDeliveryStatus = async (req, res, next) => {
         const updatedOrder = await Order.findOneAndUpdate(
             atomicFilter,
             updateOps,
-            { new: true }
+            { returnDocument: 'after' }
         );
 
         if (!updatedOrder) {

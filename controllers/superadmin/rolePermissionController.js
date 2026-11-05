@@ -2,11 +2,11 @@ const RolePermission = require("../../models/superadmin/rolePermissionModel");
 const createHttpError = require("http-errors");
 
 const defaultRolesList = [
-    { role: "Manager", allowedMenus: ["home", "deliveries", "sales", "expenses", "accounts", "inventory", "creditors", "customers", "vendors", "staff", "menuSetup", "reports", "settings", "support"], allowedSubMenus: ["home-boh", "home-date-filter", "home-popular-dishes", "home-revenue-breakdown", "home-payment-mix", "home-expense-trend", "home-expense-breakdown", "home-creditors-ledger", "items", "categories", "details", "ratios", "users", "permissions", "list", "credit-setup", "customers", "inventory-list", "inventory-setup", "vendors-directory", "cheque-setup", "staff-list", "staff-attendance", "staff-payroll", "sales-revenue", "financial-payments", "stock-inventory", "expenses-costs", "profitability", "deliveries-list", "deliveries-setup", "deliveries-refunds", "my-deliveries", "support-guide", "issues"] },
+    { role: "Manager", allowedMenus: ["home", "deliveries", "sales", "expenses", "accounts", "inventory", "creditors", "customers", "vendors", "staff", "menuSetup", "reports", "settings", "support"], allowedSubMenus: ["home-boh", "home-date-filter", "home-popular-dishes", "home-revenue-breakdown", "home-payment-mix", "home-expense-trend", "home-expense-breakdown", "home-creditors-ledger", "items", "categories", "details", "ratios", "users", "permissions", "list", "credit-setup", "customers", "inventory-list", "inventory-setup", "vendors-directory", "cheque-setup", "staff-list", "staff-attendance", "staff-payroll", "sales-revenue", "financial-payments", "stock-inventory", "commodity-ratio", "expenses-costs", "profitability", "crm-loyalty", "deliveries-list", "deliveries-setup", "deliveries-refunds", "my-deliveries", "support-guide", "issues"] },
     { role: "Cashier", allowedMenus: ["home", "sales", "deliveries", "customers", "creditors", "settings", "support"], allowedSubMenus: ["home-boh", "home-date-filter", "details", "list", "customers", "deliveries-list", "support-guide", "issues"] },
     { role: "Staff", allowedMenus: ["home", "sales", "deliveries", "settings", "support"], allowedSubMenus: ["home-boh", "details", "deliveries-list", "support-guide"] },
     { role: "Kitchen Staff", allowedMenus: ["home", "deliveries", "menuSetup", "settings", "support"], allowedSubMenus: ["home-boh", "items", "categories", "details", "deliveries-list"] },
-    { role: "Accountant", allowedMenus: ["home", "sales", "expenses", "accounts", "creditors", "vendors", "reports", "settings", "support"], allowedSubMenus: ["home-boh", "home-date-filter", "details", "list", "credit-setup", "vendors-directory", "cheque-setup", "sales-revenue", "financial-payments", "expenses-costs", "profitability"] },
+    { role: "Accountant", allowedMenus: ["home", "sales", "expenses", "accounts", "creditors", "vendors", "reports", "settings", "support"], allowedSubMenus: ["home-boh", "home-date-filter", "details", "list", "credit-setup", "vendors-directory", "cheque-setup", "sales-revenue", "financial-payments", "stock-inventory", "commodity-ratio", "expenses-costs", "profitability", "crm-loyalty"] },
     { role: "Rider", allowedMenus: ["home", "deliveries", "settings", "support"], allowedSubMenus: ["home-boh", "details", "deliveries-list", "my-deliveries", "support-guide", "issues"] }
 ];
 
@@ -203,7 +203,7 @@ const deleteRolePermission = async (req, res, next) => {
                 deletedBy: updaterName,
                 deletedOn: new Date()
             },
-            { new: true }
+            { returnDocument: 'after' }
         );
         if (!deleted) {
             const error = createHttpError(404, "Role permission config not found.");

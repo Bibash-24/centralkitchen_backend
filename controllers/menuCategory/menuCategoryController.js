@@ -5,22 +5,33 @@ const mongoose = require("mongoose");
 // POST /api/menu-category
 const addMenuCategory = async (req, res, next) => {
     try {
-        const { name, description, isActive } = req.body;
+        const { companySlug, name, description, isActive } = req.body;
 
         if (!name || !name.trim()) {
             return next(createHttpError(400, "Category name is required!"));
         }
 
-        const nameExists = await MenuCategory.findOne({
+        let targetSlug = companySlug || req.headers["x-company-slug"] || req.query.companySlug || req.user?.companySlug;
+        if (!targetSlug || targetSlug === "all") {
+            const Company = require("../../models/company/companyModel");
+            const firstCompany = await Company.findOne({ isDeleted: { $ne: true } });
+            targetSlug = firstCompany ? firstCompany.companySlug : "default-company";
+        }
+
+        const dupFilter = {
             name: { $regex: new RegExp(`^${name.trim()}$`, "i") },
             isDeleted: { $ne: true }
-        });
+        };
+        if (targetSlug) dupFilter.companySlug = targetSlug;
+
+        const nameExists = await MenuCategory.findOne(dupFilter);
         if (nameExists) {
-            return next(createHttpError(400, `A category named "${name.trim()}" already exists!`));
+            return next(createHttpError(400, `A category named "${name.trim()}" already exists in this company!`));
         }
 
         const actorName = req.user ? (req.user.email || String(req.user.phone || req.user.role)) : "System";
         const category = new MenuCategory({
+            companySlug: targetSlug,
             name: name.trim(),
             description: description ? description.trim() : "",
             isActive: isActive !== undefined ? isActive : true,
@@ -42,7 +53,13 @@ const addMenuCategory = async (req, res, next) => {
 // GET /api/menu-category
 const getMenuCategories = async (req, res, next) => {
     try {
-        const categories = await MenuCategory.find({ isDeleted: { $ne: true } }).sort({ createdAt: 1 });
+        const targetSlug = req.query.companySlug || req.headers["x-company-slug"] || req.user?.companySlug;
+        const filter = { isDeleted: { $ne: true } };
+        if (targetSlug && targetSlug !== "all") {
+            filter.companySlug = targetSlug;
+        }
+
+        const categories = await MenuCategory.find(filter).sort({ createdAt: 1 });
         res.status(200).json({
             success: true,
             message: "Menu categories retrieved successfully!",
@@ -57,26 +74,33 @@ const getMenuCategories = async (req, res, next) => {
 const updateMenuCategory = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const { name, description, isActive } = req.body;
+        const { companySlug, name, description, isActive } = req.body;
 
         if (!mongoose.Types.ObjectId.isValid(id)) {
             return next(createHttpError(400, "Invalid category ID!"));
         }
+
+        let targetSlug = companySlug || req.headers["x-company-slug"] || req.query.companySlug || req.user?.companySlug;
 
         const category = await MenuCategory.findOne({ _id: id, isDeleted: { $ne: true } });
         if (!category) {
             return next(createHttpError(404, "Category not found!"));
         }
 
+        const catSlug = category.companySlug || targetSlug;
+
         // Duplicate name check (exclude self)
         if (name && name.trim().toLowerCase() !== category.name.toLowerCase()) {
-            const nameExists = await MenuCategory.findOne({
+            const dupFilter = {
                 name: { $regex: new RegExp(`^${name.trim()}$`, "i") },
                 _id: { $ne: id },
                 isDeleted: { $ne: true }
-            });
+            };
+            if (catSlug) dupFilter.companySlug = catSlug;
+
+            const nameExists = await MenuCategory.findOne(dupFilter);
             if (nameExists) {
-                return next(createHttpError(400, `A category named "${name.trim()}" already exists!`));
+                return next(createHttpError(400, `A category named "${name.trim()}" already exists in this company!`));
             }
         }
 
@@ -85,6 +109,7 @@ const updateMenuCategory = async (req, res, next) => {
         if (name !== undefined) category.name = name.trim();
         if (description !== undefined) category.description = description.trim();
         if (isActive !== undefined) category.isActive = isActive;
+        if (targetSlug && !category.companySlug) category.companySlug = targetSlug;
         category.updatedBy = actorName;
 
         await category.save();

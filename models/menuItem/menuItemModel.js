@@ -1,11 +1,10 @@
 const mongoose = require("mongoose");
 
 const menuItemSchema = new mongoose.Schema({
-  companySlug: { type: String,  required: true, index: true },
+  companySlug: { type: String, required: true, index: true, default: "default-company" },
     name: {
         type: String,
         required: true,
-        unique: true,
         trim: true
     },
     price: {
@@ -63,6 +62,14 @@ const menuItemSchema = new mongoose.Schema({
     timestamps: true,
     toJSON: { virtuals: true },
     toObject: { virtuals: true }
+});
+
+menuItemSchema.index({ companySlug: 1, name: 1 }, { unique: true });
+
+menuItemSchema.pre("validate", function() {
+    if (!this.companySlug || typeof this.companySlug !== "string" || !this.companySlug.trim()) {
+        this.companySlug = "default-company";
+    }
 });
 
 module.exports = mongoose.model("MenuItem", menuItemSchema);
